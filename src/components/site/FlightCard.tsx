@@ -25,10 +25,15 @@ export function FlightCard({
   flight,
   variant = "active",
   isOwnListing = false,
+  // Marca de dónde se navega al detalle — hoy solo "agente" (card mostrada
+  // dentro del chat de lucIA), para que el detalle sepa mostrar "Volver al
+  // chat" en vez del "Volver a resultados" genérico.
+  linkFrom,
 }: {
   flight: Flight;
   variant?: "active" | "last_call";
   isOwnListing?: boolean;
+  linkFrom?: "agente";
 }) {
   const { isSaved, toggleSaved } = useSaved();
   const status = computeStatus(flight);
@@ -46,7 +51,8 @@ export function FlightCard({
     <Link
       to="/flight/$id"
       params={{ id: flight.id }}
-      className={`group tarjeta-boleto relative block ${
+      search={linkFrom ? { from: linkFrom } : undefined}
+      className={`group tarjeta-boleto relative block self-start ${
         isWarn
           ? "border-[color-mix(in_srgb,var(--color-warning-token)_40%,transparent)] bg-[color-mix(in_srgb,var(--color-warning-token)_5%,#FFFFFF)]"
           : ""
@@ -71,15 +77,13 @@ export function FlightCard({
       )}
 
       <div className="p-5">
-        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+        <div className="flex min-h-6 items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
           <img
             src={airlineLogo(flight.airline)}
             alt={flight.airline}
-            className="h-3.5 w-auto max-w-[64px] object-contain"
+            className="h-3.5 w-auto max-w-[64px] shrink-0 object-contain"
           />
-          <span className="truncate">{flight.airline}</span>
-          <span className="font-mono shrink-0">{flight.flightNumber}</span>
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+          <div className="ml-auto flex items-center gap-2">
             {isOwnListing ? (
               <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold normal-case tracking-normal text-gray-500">
                 Tu publicación
@@ -143,19 +147,18 @@ export function FlightCard({
         </div>
       </div>
 
-      <div className="flex items-center justify-between gap-2 border-t border-dashed border-border px-5 py-3 text-xs text-muted-foreground bg-[var(--surface-2)]">
+      <div className="flex items-center gap-2 border-t border-dashed border-border px-5 py-3 text-xs text-muted-foreground bg-[var(--surface-2)]">
         <div className="flex min-w-0 items-center gap-2">
           <Avatar className="h-6 w-6 shrink-0 border border-border shadow-sm">
-            <AvatarImage src={flight.seller.avatarUrl} alt={flight.seller.name} />
+            {flight.seller.avatarUrl && (
+              <AvatarImage src={flight.seller.avatarUrl} alt={flight.seller.name} />
+            )}
             <AvatarFallback className="text-[10px] font-bold text-[var(--color-ink)]">
               {flight.seller.avatar}
             </AvatarFallback>
           </Avatar>
           <span className="min-w-0 truncate font-medium text-[var(--color-ink)]">
-            {flight.seller.name}{" "}
-            <span className="text-muted-foreground font-normal">
-              · ★ {flight.seller.rating.toFixed(1)}
-            </span>
+            {flight.seller.name}
           </span>
           {flight.seller.verifiedId && (
             <ShieldCheck className="h-4 w-4 shrink-0 text-[var(--color-secondary-token)]" />
@@ -182,7 +185,7 @@ function SaveHeartButton({ saved, onToggle }: { saved: boolean; onToggle: () => 
       }}
       aria-label={saved ? "Quitar de guardados" : "Guardar viaje"}
       aria-pressed={saved}
-      className="grid h-6 w-6 shrink-0 place-items-center rounded-full transition-transform hover:scale-110"
+      className="relative grid h-6 w-6 shrink-0 place-items-center rounded-full transition-transform [@media(hover:hover)_and_(pointer:fine)]:hover:scale-110 active:scale-90 after:absolute after:-inset-2.5 after:content-['']"
     >
       <Heart
         className={`h-4 w-4 transition-colors ${

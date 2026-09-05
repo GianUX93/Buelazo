@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "animate-bounce",
+        "files": [
+          "src/styles.css"
+        ],
+        "createdAt": "2026-08-23T03:18:13.155Z",
+        "reason": "user confirmed: explicitly requested a three-dot bouncing typing indicator for the chat agent loader, a standard chat-UI pattern"
+      }
+    ]
+  }
+}

@@ -25,6 +25,9 @@ import {
 } from "@/lib/services/chat";
 import { useState, useEffect, useRef } from "react";
 import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
+
+gsap.registerPlugin(useGSAP);
 import { z } from "zod";
 import {
   CheckCircle2,
@@ -43,6 +46,7 @@ import {
   Heart,
   AlertTriangle,
   ArchiveX,
+  XCircle,
   Paperclip,
   FileText,
   Download,
@@ -84,6 +88,7 @@ import {
   DOCUMENTO_MAX_LEN,
 } from "@/lib/flight-utils";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { AuthRequiredPlaceholder } from "@/components/site/auth/AuthRequiredPlaceholder";
 
 const searchSchema = z.object({
   tx: z.string().optional(),
@@ -96,7 +101,7 @@ export const Route = createFileRoute("/dashboard")({
   validateSearch: (s) => searchSchema.parse(s),
   head: () => ({
     meta: [
-      { title: "Mis operaciones — Traspaso" },
+      { title: "Mis operaciones — Buelazo" },
       {
         name: "description",
         content: "Tus transacciones activas e historial como comprador y vendedor.",
@@ -162,7 +167,7 @@ function necesitaAccion(t: Transaction): boolean {
 }
 
 function Dashboard() {
-  const { ready } = useRequireAuth();
+  const { ready, isLoading: authLoading } = useRequireAuth();
   const { user, profile } = useAuth();
   const { metodoCobro } = usePayment();
   const queryClient = useQueryClient();
@@ -179,7 +184,7 @@ function Dashboard() {
       : "buyer";
   });
   const [sellerView, setSellerView] = useState<
-    "proceso" | "finalizados" | "publicados" | "retirados"
+    "proceso" | "finalizados" | "publicados" | "retirados" | "rechazados"
   >(search.vista === "publicados" ? "publicados" : "proceso");
   const [montoInputs, setMontoInputs] = useState<Record<string, number>>({});
   const [subiendoCargoId, setSubiendoCargoId] = useState<string | null>(null);
@@ -285,9 +290,11 @@ function Dashboard() {
     (f) =>
       f.dbStatus !== "cancelled" && f.dbStatus !== "rechazado" && !soldFlightIds.includes(f.id),
   );
-  const retirados = myFlights.filter(
-    (f) => f.dbStatus === "cancelled" || f.dbStatus === "rechazado",
-  );
+  // Separadas a propósito: "retirados" es una decisión del vendedor, "rechazados"
+  // es algo a corregir (admin encontró un problema) — mismo trato antes generaba
+  // confusión sobre qué acción tenía sentido en cada caso.
+  const retirados = myFlights.filter((f) => f.dbStatus === "cancelled");
+  const rechazados = myFlights.filter((f) => f.dbStatus === "rechazado");
 
   // El tab inicial (arriba) solo conoce las transacciones mock al montar —
   // una notificación real puede apuntar a una transacción real que todavía
@@ -321,7 +328,14 @@ function Dashboard() {
     // (heurística de pendienteCount), este efecto corre antes de que lleguen
     // las transacciones reales de Supabase, no encuentra la tarjeta y nunca
     // reintenta — sin esta dependencia, se queda sin hacer nada para siempre.
-  }, [search.tx, search.chat, tab, myTransactionsRaw]);
+    //
+    // ready: mientras el perfil (fetchProfile en auth-context.tsx) todavía no
+    // resuelve, esta página entera muestra <AuthRequiredPlaceholder /> en vez
+    // de las cards reales — aunque `user` ya exista y `myTransactionsRaw` ya
+    // haya llegado. Si esa carrera se da (el perfil tarda más que las
+    // transacciones), el efecto corre antes de que la card exista en el DOM y,
+    // sin `ready` como dependencia, nunca se entera de que después sí apareció.
+  }, [search.tx, search.chat, tab, myTransactionsRaw, ready]);
 
   // Notificaciones de aprobación/rechazo de una publicación (no una transacción)
   // apuntan acá — misma idea que el efecto de arriba para "tx", pero resolviendo
@@ -351,7 +365,8 @@ function Dashboard() {
     return () => window.clearTimeout(t);
     // myFlights: mismo motivo que con myTransactionsRaw arriba — si sellerView
     // ya era correcto desde el inicio, hay que reintentar cuando lleguen los datos.
-  }, [search.flight, sellerView, myFlights]);
+    // ready: misma carrera que en el efecto de "tx" — ver ese comentario.
+  }, [search.flight, sellerView, myFlights, ready]);
 
   function updateCargoConfirmado(
     id: string,
@@ -500,7 +515,8 @@ function Dashboard() {
     .filter((t) => t.state === "liberado")
     .reduce((s, t) => s + t.amount, 0);
 
-  if (!ready) return null;
+  if (authLoading) return null;
+  if (!ready) return <AuthRequiredPlaceholder />;
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 md:py-14">
@@ -515,7 +531,7 @@ function Dashboard() {
         </div>
         <Link
           to="/publish"
-          className="rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-105"
+          className="rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
         >
           Publicar un pasaje
         </Link>
@@ -561,8 +577,13 @@ function Dashboard() {
             ...(tab === "seller"
               ? ([
                   ["publicados", "Publicados", publicados.length],
+                  // Solo aparecen si hay algo que mostrar — así la mayoría de
+                  // vendedores (sin rechazos) nunca ve una fila de chips más larga.
                   ...(retirados.length > 0
                     ? ([["retirados", "Retirados", retirados.length]] as const)
+                    : []),
+                  ...(rechazados.length > 0
+                    ? ([["rechazados", "Rechazados", rechazados.length]] as const)
                     : []),
                 ] as const)
               : []),
@@ -583,23 +604,39 @@ function Dashboard() {
         ))}
       </div>
 
-      {tab === "seller" && (sellerView === "publicados" || sellerView === "retirados") ? (
+      {tab === "seller" &&
+      (sellerView === "publicados" || sellerView === "retirados" || sellerView === "rechazados") ? (
         <div className="mt-8 space-y-5">
-          {(sellerView === "publicados" ? publicados : retirados).length === 0 && (
+          {(sellerView === "publicados"
+            ? publicados
+            : sellerView === "retirados"
+              ? retirados
+              : rechazados
+          ).length === 0 && (
             <EmptyState
-              icon={sellerView === "publicados" ? Send : ArchiveX}
+              icon={
+                sellerView === "publicados" ? Send : sellerView === "retirados" ? ArchiveX : XCircle
+              }
               text={
                 sellerView === "publicados"
                   ? "No tienes pasajes publicados esperando comprador ahora mismo."
-                  : "No has retirado ninguna publicación."
+                  : sellerView === "retirados"
+                    ? "No has retirado ninguna publicación."
+                    : "No tienes publicaciones rechazadas."
               }
             />
           )}
-          {(sellerView === "publicados" ? publicados : retirados).map((f) => {
+          {(sellerView === "publicados"
+            ? publicados
+            : sellerView === "retirados"
+              ? retirados
+              : rechazados
+          ).map((f) => {
             const status = computeStatus(f);
             const tramo = tramoVigente(f);
             const retirado = sellerView === "retirados";
-            const rechazado = f.dbStatus === "rechazado";
+            const rechazado = sellerView === "rechazados";
+            const puedeReenviar = rechazado && (f.rejectionCount ?? 0) < 2;
             const enRevision = f.dbStatus === "pendiente_revision";
             return (
               <div
@@ -653,7 +690,14 @@ function Dashboard() {
                       <div className="mt-3 rounded-xl border border-red-100 bg-red-50 p-3 text-xs font-medium text-red-600">
                         <span className="font-bold">Motivo: </span>
                         {f.rejectionReason}
-                        {f.rejectionDetail && ` — ${f.rejectionDetail}`}
+                        {f.rejectionDetail && `. ${f.rejectionDetail}`}
+                      </div>
+                    )}
+                    {rechazado && !puedeReenviar && (
+                      <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs font-medium text-gray-500">
+                        Esta publicación alcanzó el límite de 2 rechazos y ya no se puede editar ni
+                        reenviar. Crea una publicación nueva si quieres volver a ofrecer este
+                        pasaje.
                       </div>
                     )}
                   </div>
@@ -663,13 +707,13 @@ function Dashboard() {
                         {S(f.resalePrice)}
                       </div>
                     </div>
-                    {!retirado && (
+                    {!retirado && (!rechazado || puedeReenviar) && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button
                             type="button"
                             aria-label="Más opciones"
-                            className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-gray-300 bg-white text-[var(--color-ink)] shadow-sm transition-colors hover:bg-gray-50"
+                            className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full border border-gray-300 bg-white text-[var(--color-ink)] shadow-sm transition-colors hover:bg-gray-50 after:absolute after:-inset-1 after:content-['']"
                           >
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
@@ -697,27 +741,30 @@ function Dashboard() {
                               params={{ id: f.id }}
                               className="flex items-center gap-2"
                             >
-                              <Pencil className="h-4 w-4 text-muted-foreground" /> Editar
+                              <Pencil className="h-4 w-4 text-muted-foreground" />{" "}
+                              {rechazado ? "Editar y reenviar" : "Editar"}
                             </Link>
                           </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() =>
-                              setRetirarModal({
-                                id: f.id,
-                                ruta: `${tramo.origin.code} → ${tramo.destination.code}`,
-                              })
-                            }
-                            className="flex items-center gap-2 text-red-500 focus:bg-red-50! focus:text-red-500!"
-                          >
-                            <Trash2 className="h-4 w-4" /> Retirar publicación
-                          </DropdownMenuItem>
+                          {!rechazado && (
+                            <DropdownMenuItem
+                              onClick={() =>
+                                setRetirarModal({
+                                  id: f.id,
+                                  ruta: `${tramo.origin.code} → ${tramo.destination.code}`,
+                                })
+                              }
+                              className="flex items-center gap-2 text-red-500 focus:bg-red-50! focus:text-red-500!"
+                            >
+                              <Trash2 className="h-4 w-4" /> Retirar publicación
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
                   </div>
                 </div>
 
-                {!retirado && (
+                {!retirado && !rechazado && (
                   <div className="mt-6 grid grid-cols-3 gap-4 border-t border-dashed border-gray-200 pt-6">
                     <div>
                       <div className="font-mono text-2xl font-bold text-[var(--color-ink)]">
@@ -747,7 +794,7 @@ function Dashboard() {
                   </div>
                 )}
 
-                {retirado && (
+                {(retirado || (rechazado && !puedeReenviar)) && (
                   <div className="mt-6 flex items-center gap-3">
                     <Link
                       to="/flight/$id"
@@ -838,6 +885,8 @@ function Dashboard() {
                   <button
                     type="button"
                     onClick={() => setExpandedTxId(expanded ? null : t.id)}
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? "Ocultar" : "Ver"} detalle de la transacción ${tramo.origin.code} → ${tramo.destination.code}`}
                     className="flex w-full flex-wrap items-start justify-between gap-6 text-left"
                   >
                     <div className="min-w-0 flex-1">
@@ -853,9 +902,7 @@ function Dashboard() {
                         </span>
                         {flight.airline} · <span className="font-mono">{flight.flightNumber}</span>
                         {status === "last_call" && (
-                          <span className="text-[var(--color-warning-token)]">
-                            · última llamada
-                          </span>
+                          <span className="text-warning-ink">· última llamada</span>
                         )}
                       </div>
                       <div className="mt-3 font-display text-2xl font-bold text-[var(--color-ink)]">
@@ -878,11 +925,11 @@ function Dashboard() {
                           {stateLabels[t.state]}
                         </div>
                       </div>
-                      <ChevronDown
-                        className={`mt-1 h-5 w-5 shrink-0 text-gray-400 transition-transform ${
-                          expanded ? "rotate-180" : ""
-                        }`}
-                      />
+                      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-gray-300 bg-white text-[var(--color-ink)] shadow-sm">
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`}
+                        />
+                      </div>
                     </div>
                   </button>
 
@@ -924,7 +971,7 @@ function Dashboard() {
                             ¿La aerolínea te cobró algo por el trámite?
                           </div>
                           <p className="mt-1 text-xs font-medium text-muted-foreground leading-relaxed">
-                            Este es el monto real y verificado del endoso — determina el neto final
+                            Este es el monto real y verificado del endoso. Determina el neto final
                             que se libera del escrow, no el estimado que pusiste al publicar.
                           </p>
 
@@ -934,7 +981,7 @@ function Dashboard() {
                                 <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-ink)]">
                                   Monto que te cobró la aerolínea
                                 </span>
-                                <div className="flex items-center gap-2 rounded-xl border border-border bg-white px-4 py-3 text-sm">
+                                <div className="flex items-center gap-2 rounded-xl border border-border bg-white px-4 py-3 text-sm focus-within:border-[var(--color-primary-token)] focus-within:ring-1 focus-within:ring-[var(--color-primary-token)]">
                                   <span className="text-muted-foreground font-bold">S/</span>
                                   <input
                                     type="number"
@@ -1002,7 +1049,7 @@ function Dashboard() {
                                       toast.success(
                                         manual
                                           ? "Cargo reportado. Por su monto, requiere revisión manual."
-                                          : "Cargo reportado y aceptado — se incluyó en el neto final.",
+                                          : "Cargo reportado y aceptado. Se incluyó en el neto final.",
                                       );
                                     } catch {
                                       toast.error(
@@ -1043,7 +1090,7 @@ function Dashboard() {
                               </div>
                               {t.cargoAerolineaConfirmado.revisionManualRequerida && (
                                 <div className="mt-1 font-bold text-red-600">
-                                  Este monto supera el 50% del precio de venta (S/ {t.amount}) — no
+                                  Este monto supera el 50% del precio de venta (S/ {t.amount}). No
                                   se acepta automáticamente aunque tenga evidencia. Un revisor debe
                                   confirmarlo explícitamente.
                                 </div>
@@ -1065,7 +1112,7 @@ function Dashboard() {
                                   }`}
                                 >
                                   <span className="self-center text-[10px] font-bold uppercase tracking-widest text-[var(--color-ink)]/50">
-                                    Demo — panel de revisión:
+                                    Demo del panel de revisión:
                                   </span>
                                   <button
                                     type="button"
@@ -1143,7 +1190,7 @@ function Dashboard() {
                                   value={`− ${S(cargoVigente)}`}
                                 />
                                 <ReceiptRow
-                                  label={`Comisión Traspaso (${Math.round(PLATFORM_COMMISSION_RATE * 100)}%)`}
+                                  label={`Comisión Buelazo (${Math.round(PLATFORM_COMMISSION_RATE * 100)}%)`}
                                   value={`− ${S(comisionAplicada)}`}
                                   note={
                                     comisionReducida
@@ -1175,7 +1222,7 @@ function Dashboard() {
                             </div>
                             <p className="mt-1 text-xs font-medium text-muted-foreground leading-relaxed">
                               La aerolínea exige identificar al nuevo titular para hacer el endoso.
-                              Estos datos solo los ve el vendedor de esta transacción — nunca se
+                              Estos datos solo los ve el vendedor de esta transacción. Nunca se
                               piden por chat.
                             </p>
                             <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-muted-foreground leading-relaxed">
@@ -1187,7 +1234,7 @@ function Dashboard() {
                               <div className="grid gap-4 sm:grid-cols-2">
                                 <EndosoField label="Nombres">
                                   <input
-                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                                     value={datosEndoso.nombres}
                                     onChange={(e) =>
                                       updateDatosCompradorEndoso(t, { nombres: e.target.value })
@@ -1196,7 +1243,7 @@ function Dashboard() {
                                 </EndosoField>
                                 <EndosoField label="Apellido paterno">
                                   <input
-                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                                     value={datosEndoso.apellidoPaterno}
                                     onChange={(e) =>
                                       updateDatosCompradorEndoso(t, {
@@ -1207,7 +1254,7 @@ function Dashboard() {
                                 </EndosoField>
                                 <EndosoField label="Apellido materno">
                                   <input
-                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                                     value={datosEndoso.apellidoMaterno}
                                     onChange={(e) =>
                                       updateDatosCompradorEndoso(t, {
@@ -1218,7 +1265,7 @@ function Dashboard() {
                                 </EndosoField>
                                 <EndosoField label="Tipo de documento">
                                   <select
-                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                                     value={datosEndoso.tipoDocumento}
                                     onChange={(e) =>
                                       updateDatosCompradorEndoso(t, {
@@ -1235,7 +1282,7 @@ function Dashboard() {
                                 </EndosoField>
                                 <EndosoField label="Número de documento">
                                   <input
-                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm font-mono font-bold focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                                    className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-base sm:text-sm font-mono font-bold focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                                     inputMode={
                                       datosEndoso.tipoDocumento === "Pasaporte" ? "text" : "numeric"
                                     }
@@ -1265,7 +1312,7 @@ function Dashboard() {
                                   datosEndoso.numeroDocumento.length !==
                                     DOCUMENTO_MAX_LEN[datosEndoso.tipoDocumento]
                                 }
-                                className="rounded-full bg-[var(--color-primary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 disabled:cursor-not-allowed disabled:opacity-40"
+                                className="rounded-full bg-[var(--color-primary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 Enviar mis datos al vendedor
                               </button>
@@ -1275,6 +1322,11 @@ function Dashboard() {
 
                       {puedeGestionar &&
                         t.role === "buyer" &&
+                        // Solo mientras el trámite sigue en "Pago confirmado" — una vez
+                        // que el vendedor avanza a "Vendedor inicia trámite" o más allá,
+                        // este aviso ya no aporta nada (los datos ya se usaron) y se
+                        // quedaba pegado en pantalla durante el resto del proceso.
+                        t.state === "pago_retenido" &&
                         datosEndoso.completadoPorComprador && (
                           <div className="mt-8 flex items-center gap-2 rounded-xl border border-[var(--color-secondary-token)]/40 bg-[var(--color-secondary-token)]/5 p-4 text-xs font-bold text-[var(--color-secondary-token)]">
                             <IdCard className="h-4 w-4" /> Ya enviaste tus datos de endoso al
@@ -1291,7 +1343,7 @@ function Dashboard() {
                               ¿Ya revisaste tu pasaje y está todo correcto?
                             </div>
                             <p className="mt-1 text-xs font-medium text-muted-foreground leading-relaxed">
-                              Revisa el ticket o la app de la aerolínea antes de confirmar — recién
+                              Revisa el ticket o la app de la aerolínea antes de confirmar. Recién
                               después de tu confirmación el vendedor puede liberar el pago retenido.
                             </p>
                             <button
@@ -1303,13 +1355,13 @@ function Dashboard() {
                                     queryKey: ["transactions", "mine"],
                                   });
                                   toast.success(
-                                    "Confirmado — el vendedor ya puede liberar el pago.",
+                                    "Confirmado. El vendedor ya puede liberar el pago.",
                                   );
                                 } catch {
                                   toast.error("No se pudo confirmar. Intenta de nuevo.");
                                 }
                               }}
-                              className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+                              className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                             >
                               <CheckCircle2 className="h-4 w-4" /> Todo OK, liberar pago
                             </button>
@@ -1341,7 +1393,7 @@ function Dashboard() {
                                     advanceState(t, "vendedor_inicia");
                                     toast.success("Trámite iniciado con la aerolínea.");
                                   }}
-                                  className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+                                  className="mt-4 inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                                 >
                                   <PlaneTakeoff className="h-4 w-4" /> Iniciar trámite con la
                                   aerolínea
@@ -1372,7 +1424,7 @@ function Dashboard() {
                               advanceState(t, "confirmado");
                               toast.success("Traspaso confirmado por la aerolínea.");
                             }}
-                            className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+                            className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                           >
                             <CheckCircle2 className="h-4 w-4" /> Confirmar traspaso
                           </button>
@@ -1405,7 +1457,7 @@ function Dashboard() {
                           <div className="mt-8 flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-primary-token)]/30 bg-[var(--color-primary-token)]/5 p-5">
                             <div>
                               <div className="text-sm font-bold text-[var(--color-ink)]">
-                                Traspaso confirmado — listo para liberar tu pago
+                                Traspaso confirmado: listo para liberar tu pago
                               </div>
                               <p className="mt-1 text-xs font-medium text-muted-foreground">
                                 El neto final ({S(montoNetoFinal(t))}) se transferirá a tu cuenta.
@@ -1420,7 +1472,7 @@ function Dashboard() {
                                   ruta: `${tramoVigente(flight).origin.code} → ${tramoVigente(flight).destination.code}`,
                                 });
                               }}
-                              className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+                              className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                             >
                               <Lock className="h-4 w-4" /> Liberar pago retenido
                             </button>
@@ -1429,7 +1481,7 @@ function Dashboard() {
                           <div className="mt-8 flex items-center justify-between gap-4 rounded-2xl border border-[var(--color-warning-token)]/50 bg-[var(--color-warning-token)]/10 p-5">
                             <div>
                               <div className="flex items-center gap-2 text-sm font-bold text-[var(--color-ink)]">
-                                <AlertTriangle className="h-4 w-4 text-[var(--color-warning-token)]" />
+                                <AlertTriangle className="h-4 w-4 text-warning-ink" />
                                 Configura cómo recibir tu pago
                               </div>
                               <p className="mt-1 text-xs font-medium text-muted-foreground">
@@ -1440,7 +1492,7 @@ function Dashboard() {
                             <Link
                               to="/profile"
                               search={{ tab: "preferencias" }}
-                              className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+                              className="shrink-0 inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-6 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                             >
                               Configurar
                             </Link>
@@ -1499,7 +1551,7 @@ function Dashboard() {
                       {enDisputa && t.isReal && t.role === "seller" && (
                         <div className="mt-4 flex items-center justify-between gap-4 rounded-2xl border border-red-200 bg-red-50 p-4">
                           <p className="text-xs font-medium text-red-600 leading-relaxed">
-                            Sin panel de soporte todavía — si ya confirmaste con la aerolínea que el
+                            Sin panel de soporte todavía. Si ya confirmaste con la aerolínea que el
                             cambio no procede, marca el reembolso tú mismo.
                           </p>
                           <button
@@ -1515,7 +1567,7 @@ function Dashboard() {
                                 toast.error("No se pudo marcar el reembolso.");
                               }
                             }}
-                            className="shrink-0 rounded-full bg-red-500 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105"
+                            className="shrink-0 rounded-full bg-red-500 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                           >
                             Marcar como reembolsado
                           </button>
@@ -1525,7 +1577,7 @@ function Dashboard() {
                       {openChatId === t.id && (
                         <div className="mt-4 rounded-2xl border border-border bg-gray-50 p-4">
                           <div className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                            Chat interno de la transacción — nunca WhatsApp ni tu teléfono real
+                            Chat interno de la transacción: nunca WhatsApp ni tu teléfono real
                           </div>
                           <div
                             ref={chatScrollRef}
@@ -1568,6 +1620,7 @@ function Dashboard() {
                                         <img
                                           src={m.adjunto.url}
                                           alt={m.adjunto.nombre}
+                                          loading="lazy"
                                           className="h-10 w-10 shrink-0 rounded-lg object-cover"
                                         />
                                       )}
@@ -1602,7 +1655,7 @@ function Dashboard() {
                               />
                             </label>
                             <input
-                              className="w-full rounded-full border border-border bg-white px-4 py-2 text-sm focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                              className="w-full rounded-full border border-border bg-white px-4 py-2 text-base sm:text-sm focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                               placeholder="Escribe un mensaje..."
                               value={chatDrafts[t.id] ?? ""}
                               onChange={(e) =>
@@ -1613,7 +1666,7 @@ function Dashboard() {
                             <button
                               type="button"
                               onClick={() => sendChatMensaje(t)}
-                              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--color-primary-token)] text-white shadow-sm transition-transform hover:scale-105"
+                              className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--color-primary-token)] text-white shadow-sm transition-transform hover:scale-105 active:scale-95"
                             >
                               <Send className="h-4 w-4" />
                             </button>
@@ -1691,7 +1744,7 @@ function Dashboard() {
             <button
               type="button"
               onClick={() => setLiberadoModal(null)}
-              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02]"
+              className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform ease-snappy hover:scale-[1.02] active:scale-[0.98]"
             >
               Entendido
             </button>
@@ -1747,7 +1800,7 @@ function Dashboard() {
                     setRetirando(false);
                   }
                 }}
-                className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform ease-snappy hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
               >
                 {retirando ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -1804,7 +1857,7 @@ function Dashboard() {
                 value={reportDetalle}
                 onChange={(e) => setReportDetalle(e.target.value)}
                 placeholder="Agrega cualquier detalle que ayude a resolver el caso más rápido…"
-                className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
               />
             </label>
 
@@ -1857,7 +1910,7 @@ function Dashboard() {
                   );
                   setReportModal(null);
                 }}
-                className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform ease-snappy hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:active:scale-100"
               >
                 Enviar reporte
               </button>
@@ -1882,47 +1935,55 @@ const CONFETTI_COLORES = [
 function Confetti({ active }: { active: boolean }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    if (!active || !containerRef.current) return;
-    const container = containerRef.current;
-    const piezas: HTMLDivElement[] = [];
-    for (let i = 0; i < 20; i++) {
-      const el = document.createElement("div");
-      const size = 5 + Math.random() * 4;
-      el.style.position = "absolute";
-      el.style.top = "-10px";
-      el.style.left = `${5 + Math.random() * 90}%`;
-      el.style.width = `${size}px`;
-      el.style.height = `${size * 0.5}px`;
-      el.style.borderRadius = "1px";
-      el.style.background = CONFETTI_COLORES[i % CONFETTI_COLORES.length];
-      el.style.opacity = "0";
-      container.appendChild(el);
-      piezas.push(el);
-    }
+  useGSAP(
+    () => {
+      if (!active || !containerRef.current) return;
+      // Puramente celebratorio — el ícono y el texto de "¡Pago liberado!" ya
+      // comunican el éxito sin el confeti, así que quien pide menos movimiento
+      // simplemente no lo ve, sin perder ninguna información real.
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      const container = containerRef.current;
+      const piezas: HTMLDivElement[] = [];
+      for (let i = 0; i < 20; i++) {
+        const el = document.createElement("div");
+        const size = 5 + Math.random() * 4;
+        el.style.position = "absolute";
+        el.style.top = "-10px";
+        el.style.left = `${5 + Math.random() * 90}%`;
+        el.style.width = `${size}px`;
+        el.style.height = `${size * 0.5}px`;
+        el.style.borderRadius = "1px";
+        el.style.background = CONFETTI_COLORES[i % CONFETTI_COLORES.length];
+        el.style.opacity = "0";
+        container.appendChild(el);
+        piezas.push(el);
+      }
 
-    const tl = gsap.timeline();
-    piezas.forEach((el, i) => {
-      tl.fromTo(
-        el,
-        { y: 0, opacity: 1, rotation: 0 },
-        {
-          y: 140 + Math.random() * 60,
-          x: (Math.random() - 0.5) * 60,
-          rotation: (Math.random() - 0.5) * 360,
-          opacity: 0,
-          duration: 1.1 + Math.random() * 0.4,
-          ease: "power1.in",
-        },
-        i * 0.02,
-      );
-    });
+      const tl = gsap.timeline();
+      piezas.forEach((el, i) => {
+        tl.fromTo(
+          el,
+          { y: 0, opacity: 1, rotation: 0 },
+          {
+            y: 140 + Math.random() * 60,
+            x: (Math.random() - 0.5) * 60,
+            rotation: (Math.random() - 0.5) * 360,
+            opacity: 0,
+            duration: 1.1 + Math.random() * 0.4,
+            ease: "power1.in",
+          },
+          i * 0.02,
+        );
+      });
 
-    return () => {
-      tl.kill();
-      piezas.forEach((el) => el.remove());
-    };
-  }, [active]);
+      // El revert automático de useGSAP mata el timeline, pero no borra los
+      // divs que creamos a mano — eso sigue siendo responsabilidad nuestra.
+      return () => {
+        piezas.forEach((el) => el.remove());
+      };
+    },
+    { scope: containerRef, dependencies: [active] },
+  );
 
   return (
     <div

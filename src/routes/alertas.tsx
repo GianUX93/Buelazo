@@ -5,7 +5,7 @@ import { useAlerts } from "@/lib/alerts-context";
 export const Route = createFileRoute("/alertas")({
   head: () => ({
     meta: [
-      { title: "Alertas — Traspaso" },
+      { title: "Alertas — Buelazo" },
       {
         name: "description",
         content: "Notificaciones sobre tus búsquedas y el estado de tus endosos.",
@@ -53,7 +53,12 @@ function Alertas() {
         {alertas.map((a) => (
           <a
             key={a.id}
-            href={a.href}
+            // Mismo fallback que el dropdown de notificaciones del header — si
+            // la notificación no trae `href` (ej. el trigger de Supabase no lo
+            // generó para ese tipo de evento), un <a> sin `href` no navega a
+            // ningún lado al hacer click, dejando la impresión de que el click
+            // "no hizo nada".
+            href={a.href ?? "/alertas"}
             onClick={() => markRead(a.id)}
             className="flex w-full items-start gap-4 rounded-[1.5rem] border border-border bg-white p-5 text-left shadow-sm transition-colors hover:bg-surface-2"
           >

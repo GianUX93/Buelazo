@@ -32,6 +32,35 @@ export async function getActiveFlights() {
   return data.map((dbFlight) => mapDbFlightToFrontend(dbFlight));
 }
 
+// Precios de reventa de OTRAS publicaciones activas en la misma ruta — usado
+// para sugerir un precio competitivo al publicar. Deliberadamente NO usa la
+// tabla `transactions` (precio real de venta): esa tabla solo es legible por
+// sus propios participantes (RLS "buyer_id=auth.uid() OR seller_id=auth.uid()"),
+// así que un vendedor no puede ver a qué precio vendieron otros. `flights`, en
+// cambio, ya es pública para cualquiera que explora el marketplace — mismos
+// datos, sin necesitar una función nueva en la base de datos.
+export async function getSimilarActiveResalePrices(
+  originCode: string,
+  destinationCode: string,
+  airline?: string,
+): Promise<number[]> {
+  let query = supabase
+    .from("flights")
+    .select("resale_price")
+    .in("status", ["active", "last_call"])
+    .eq("origin_code", originCode)
+    .eq("destination_code", destinationCode);
+
+  if (airline) query = query.eq("airline", airline);
+
+  const { data, error } = await query;
+  if (error) {
+    console.error("Error fetching similar flight prices:", error);
+    throw error;
+  }
+  return data.map((row) => row.resale_price as number);
+}
+
 export async function getFlightById(id: string) {
   const { data, error } = await supabase
     .from("flights")
@@ -133,12 +162,18 @@ export interface NewFlightInput {
   resale_price: number;
   seat_outbound: unknown;
   seat_return: unknown;
+  baggage: string;
+  fare_type: string;
   airline_fee_estimate: number | null;
   status: "active" | "last_call" | "pendiente_revision";
   seller_id: string;
   reservation_code: string;
   voucher_url: string | null;
   seller_note: string | null;
+  // Nunca se envían al crear un vuelo — solo el admin los setea (rejectFlight) o
+  // se limpian al reenviar uno rechazado a revisión (ver edit-flight.$id.tsx).
+  rejection_reason?: string | null;
+  rejection_detail?: string | null;
 }
 
 // Sube el comprobante de reserva (PDF o imagen) que se revisa manualmente
@@ -223,13 +258,26 @@ export async function approveFlight(id: string) {
   }
 }
 
+// Cuenta cuántas veces fue rechazada en total (incluyendo rechazos ya corregidos
+// previamente) — al llegar a 2, dashboard.tsx deja de ofrecer "Editar y reenviar".
 export async function rejectFlight(id: string, motivo: string, detalle: string) {
+  const { data: current, error: fetchError } = await supabase
+    .from("flights")
+    .select("rejection_count")
+    .eq("id", id)
+    .single();
+  if (fetchError) {
+    console.error("Error reading rejection_count:", fetchError);
+    throw fetchError;
+  }
+
   const { error } = await supabase
     .from("flights")
     .update({
       status: "rechazado",
       rejection_reason: motivo,
       rejection_detail: detalle.trim() || null,
+      rejection_count: (current?.rejection_count ?? 0) + 1,
     })
     .eq("id", id);
   if (error) {
@@ -285,7 +333,8 @@ export function mapDbFlightToFrontend(dbFlight: any): any {
     flightNumber: dbFlight.booking_code, // Usando PNR como flightNumber temporalmente
     originalPrice: Number(dbFlight.original_price),
     resalePrice: Number(dbFlight.resale_price),
-    baggage: "cabina + 23kg", // Dummy por ahora
+    baggage: dbFlight.baggage || "cabina + 23kg",
+    fareType: dbFlight.fare_type || undefined,
     asientoIda: dbFlight.seat_outbound || null,
     asientoRegreso: dbFlight.seat_return || null,
     seller: {
@@ -296,11 +345,9 @@ export function mapDbFlightToFrontend(dbFlight: any): any {
       id: dbFlight.seller_id,
       name: `${dbFlight.profiles?.first_name} ${dbFlight.profiles?.last_name}`,
       avatar: dbFlight.profiles?.first_name?.charAt(0) || "U",
-      avatarUrl:
-        dbFlight.profiles?.avatar_url || `https://i.pravatar.cc/150?u=${dbFlight.seller_id}`,
-      // Sin sistema de reseñas todavía — el rating sigue fijo hasta que exista.
-      rating: 5.0,
-      reviews: dbFlight.profiles?.completed_transfers ?? 0,
+      // Sin foto real, el Avatar cae a su AvatarFallback (inicial) — nunca a una
+      // foto genérica de pravatar.com que el vendedor no reconocería como suya.
+      avatarUrl: dbFlight.profiles?.avatar_url || null,
       verifiedId: dbFlight.profiles?.is_verified || false,
       memberSince: dbFlight.profiles?.created_at
         ? String(new Date(dbFlight.profiles.created_at).getFullYear())
@@ -309,6 +356,7 @@ export function mapDbFlightToFrontend(dbFlight: any): any {
     note: dbFlight.seller_note || undefined,
     rejectionReason: dbFlight.rejection_reason || undefined,
     rejectionDetail: dbFlight.rejection_detail || undefined,
+    rejectionCount: dbFlight.rejection_count ?? 0,
     sellerAllowsLastCall: dbFlight.status === "last_call",
     // Status crudo de la BD (incluye "cancelled"/"sold", que computeStatus() no
     // conoce — ese helper solo deriva active/last_call/expired a partir de la fecha).

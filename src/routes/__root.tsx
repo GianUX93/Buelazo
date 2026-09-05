@@ -15,7 +15,11 @@ import { SiteFooter } from "../components/site/SiteFooter";
 import { AlertsProvider } from "../lib/alerts-context";
 import { SavedProvider } from "../lib/saved-context";
 import { AuthProvider } from "../lib/auth-context";
+import { AuthModalProvider } from "../lib/auth-modal-context";
+import { AuthModal } from "../components/site/auth/AuthModal";
 import { PaymentProvider } from "../lib/payment-context";
+import { HeaderVisualProvider, useHeaderVisual } from "../lib/header-visual-context";
+import { ChatSessionProvider } from "../lib/chat-agent/chat-session-context";
 import { Toaster } from "sonner";
 
 function NotFoundComponent() {
@@ -69,13 +73,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { name: "theme-color", content: "#161514" },
-      { title: "Traspaso — Vuelos que otros no pueden usar" },
+      { title: "Buelazo — Vuelos que otros no pueden usar" },
       {
         name: "description",
         content:
           "Marketplace P2P peruano de endoso de pasajes aéreos. Recupera el valor de tu boleto o vuela con descuentos de último minuto, con pago retenido hasta confirmar el traspaso.",
       },
-      { property: "og:title", content: "Traspaso — Vuelos endosados con pago retenido" },
+      { property: "og:title", content: "Buelazo — Vuelos endosados con pago retenido" },
       {
         property: "og:description",
         content:
@@ -115,25 +119,42 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+// Vive dentro de HeaderVisualProvider (no en RootComponent, por encima del
+// provider) para poder leer footerVisible y ocultar el footer en el modo
+// Agéntico de /explore, sin que ninguna otra ruta se vea afectada.
+function AppShell() {
+  const { footerVisible } = useHeaderVisual();
+  return (
+    <div className="flex min-h-screen flex-col">
+      <SiteHeader />
+      <main className="flex-1">
+        <Outlet />
+      </main>
+      {footerVisible && <SiteFooter />}
+      <AuthModal />
+    </div>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <AlertsProvider>
-          <SavedProvider>
-            <PaymentProvider>
-              <div className="flex min-h-screen flex-col">
-                <SiteHeader />
-                <main className="flex-1">
-                  <Outlet />
-                </main>
-                <SiteFooter />
-              </div>
-              <Toaster theme="light" position="top-center" />
-            </PaymentProvider>
-          </SavedProvider>
-        </AlertsProvider>
+        <AuthModalProvider>
+          <AlertsProvider>
+            <SavedProvider>
+              <PaymentProvider>
+                <HeaderVisualProvider>
+                  <ChatSessionProvider>
+                    <AppShell />
+                    <Toaster theme="light" position="top-center" />
+                  </ChatSessionProvider>
+                </HeaderVisualProvider>
+              </PaymentProvider>
+            </SavedProvider>
+          </AlertsProvider>
+        </AuthModalProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

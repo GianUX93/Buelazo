@@ -120,7 +120,7 @@ export function requiereRevisionManual(monto: number, precioVenta: number): bool
 }
 
 // El neto del vendedor nunca puede quedar negativo. Primero se descuenta el cargo de
-// aerolínea del precio de venta; la comisión de Traspaso se cobra normalmente si todavía
+// aerolínea del precio de venta; la comisión de Buelazo se cobra normalmente si todavía
 // queda margen, pero se reduce (o se renuncia por completo) hasta el punto necesario para
 // mantener el piso en S/0 — la plataforma nunca gana una comisión que deje al vendedor en
 // negativo, pero tampoco "regresa" dinero de su bolsillo más allá de eso.
@@ -184,6 +184,37 @@ export const DOCUMENTO_MAX_LEN: Record<TipoDocumento, number> = {
   DNI: 8,
   "Carné de Extranjería": 9,
   Pasaporte: 12,
+};
+
+// Catálogo genérico por aerolínea — no está integrado a ninguna API real de
+// aerolínea, es solo lo que el vendedor selecciona como dato informativo al
+// publicar (ver publish.tsx). Nombres basados en las tarifas típicas que cada
+// aerolínea ofrece hoy en sus propios canales de venta.
+export const FARE_TYPES: Record<Flight["airline"], string[]> = {
+  LATAM: ["Basic", "Light", "Full", "Premium Economy"],
+  "Sky Airline": ["Basic", "Light", "Standard", "Max", "Max Flex"],
+  JetSmart: ["Ligero", "Smart", "Full"],
+};
+
+// Cada opción visible mapea a uno de los 3 valores canónicos de Flight["baggage"]
+// (el mismo dato que ya usan los filtros y el chat) — solo cambia la etiqueta
+// que ve el vendedor según cómo su aerolínea llama a esa franquicia.
+export const BAGGAGE_OPTIONS: Record<
+  Flight["airline"],
+  { value: Flight["baggage"]; label: string }[]
+> = {
+  LATAM: [
+    { value: "solo cabina", label: "Solo cabina" },
+    { value: "cabina + 23kg", label: "Cabina + 23kg" },
+  ],
+  "Sky Airline": [
+    { value: "solo cabina", label: "Solo cabina" },
+    { value: "23kg incluido", label: "23kg incluido" },
+  ],
+  JetSmart: [
+    { value: "solo cabina", label: "Bolso o mochila (solo cabina)" },
+    { value: "23kg incluido", label: "Equipaje en bodega (23kg)" },
+  ],
 };
 
 export function airlineLogo(a: Flight["airline"]): string {

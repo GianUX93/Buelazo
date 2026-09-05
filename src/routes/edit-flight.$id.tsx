@@ -14,10 +14,11 @@ import {
 } from "@/lib/mock-data";
 import { S, PLATFORM_COMMISSION_RATE, tramoAVenderLabel } from "@/lib/flight-utils";
 import { Field, PillToggle, AsientoFields, ReceiptRow } from "@/components/site/PublishFormFields";
+import { AuthRequiredPlaceholder } from "@/components/site/auth/AuthRequiredPlaceholder";
 
 export const Route = createFileRoute("/edit-flight/$id")({
   head: () => ({
-    meta: [{ title: "Editar publicación — Traspaso" }],
+    meta: [{ title: "Editar publicación — Buelazo" }],
   }),
   component: EditFlight,
 });
@@ -40,7 +41,7 @@ function splitIso(iso: string | null | undefined): { date: string; time: string 
 }
 
 function EditFlight() {
-  const { ready } = useRequireAuth();
+  const { ready, isLoading: authLoading } = useRequireAuth();
   const { user } = useAuth();
   const navigate = useNavigate();
   const { id } = Route.useParams();
@@ -100,7 +101,18 @@ function EditFlight() {
     });
   }, [flight, data]);
 
-  if (!ready || isLoading || !data) {
+  if (!ready) {
+    if (authLoading) {
+      return (
+        <div className="mx-auto flex max-w-3xl items-center justify-center px-4 py-24">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      );
+    }
+    return <AuthRequiredPlaceholder />;
+  }
+
+  if (isLoading || !data) {
     return (
       <div className="mx-auto flex max-w-3xl items-center justify-center px-4 py-24">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -125,11 +137,16 @@ function EditFlight() {
   }
 
   const esDueño = user?.id === flight.seller.id;
+  // Una publicación rechazada 2 veces ya no se puede reenviar — el vendedor tiene
+  // que crear una nueva desde cero (ver dashboard.tsx, límite duro de reintentos).
+  const limiteReintentosAlcanzado =
+    flight.dbStatus === "rechazado" && (flight.rejectionCount ?? 0) >= 2;
   const editable =
-    flight.dbStatus === "active" ||
-    flight.dbStatus === "last_call" ||
-    flight.dbStatus === "pendiente_revision" ||
-    flight.dbStatus === "rechazado";
+    (flight.dbStatus === "active" ||
+      flight.dbStatus === "last_call" ||
+      flight.dbStatus === "pendiente_revision" ||
+      flight.dbStatus === "rechazado") &&
+    !limiteReintentosAlcanzado;
   const tieneRegreso = !!flight.tramoRegreso;
 
   if (!esDueño || !editable) {
@@ -141,9 +158,11 @@ function EditFlight() {
             : "No puedes editar esta publicación."}
         </h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          {esDueño
-            ? "Solo se pueden editar publicaciones activas, antes de tener comprador."
-            : "Esta publicación no te pertenece."}
+          {!esDueño
+            ? "Esta publicación no te pertenece."
+            : limiteReintentosAlcanzado
+              ? "Alcanzó el límite de 2 rechazos. Crea una publicación nueva si quieres volver a ofrecer este pasaje."
+              : "Solo se pueden editar publicaciones activas, antes de tener comprador."}
         </p>
         <Link
           to="/dashboard"
@@ -215,8 +234,12 @@ function EditFlight() {
 
     // Si estaba rechazada, editarla la reenvía a revisión — no tiene sentido
     // corregirla y dejarla "rechazada" para siempre sin que nadie la revise de nuevo.
+    // El motivo/detalle del rechazo anterior se limpia: el vendedor ya lo corrigió,
+    // no tiene sentido que siga viéndolo mientras espera el nuevo veredicto.
     if (flight.dbStatus === "rechazado") {
       input.status = "pendiente_revision";
+      input.rejection_reason = null;
+      input.rejection_detail = null;
     }
 
     setGuardando(true);
@@ -249,7 +272,7 @@ function EditFlight() {
           <Field label="Aerolínea">
             <div className="relative">
               <select
-                className="w-full appearance-none rounded-xl border border-border bg-background py-3 pl-4 pr-10 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                className="w-full appearance-none rounded-xl border border-border bg-background py-3 pl-4 pr-10 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                 value={data.airline}
                 onChange={(e) => setData({ ...data, airline: e.target.value })}
               >
@@ -264,7 +287,7 @@ function EditFlight() {
           </Field>
           <Field label="Número de vuelo">
             <input
-              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
               value={data.flightNumber}
               onChange={(e) => setData({ ...data, flightNumber: e.target.value })}
             />
@@ -273,7 +296,7 @@ function EditFlight() {
 
         <div className="rounded-2xl border border-border bg-gray-50 p-6 space-y-5">
           <div className="text-xs font-bold uppercase tracking-widest text-[var(--color-ink)]">
-            Tramo de ida —{" "}
+            Tramo de ida:{" "}
             {airportsList.find((a) => a.code === flight.tramoIda.origin.code)?.city ??
               flight.tramoIda.origin.city}{" "}
             ({flight.tramoIda.origin.code}) → {flight.tramoIda.destination.city} (
@@ -283,7 +306,7 @@ function EditFlight() {
             <Field label="Fecha">
               <input
                 type="date"
-                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                 value={data.date}
                 onChange={(e) => setData({ ...data, date: e.target.value })}
               />
@@ -291,7 +314,7 @@ function EditFlight() {
             <Field label="Hora salida">
               <input
                 type="time"
-                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                 value={data.time}
                 onChange={(e) => setData({ ...data, time: e.target.value })}
               />
@@ -302,7 +325,7 @@ function EditFlight() {
         {tieneRegreso && (
           <div className="rounded-2xl border border-border bg-gray-50 p-6 space-y-5">
             <div className="text-xs font-bold uppercase tracking-widest text-[var(--color-ink)]">
-              Tramo de regreso — {flight.tramoRegreso!.origin.city} (
+              Tramo de regreso: {flight.tramoRegreso!.origin.city} (
               {flight.tramoRegreso!.origin.code}) → {flight.tramoRegreso!.destination.city} (
               {flight.tramoRegreso!.destination.code})
             </div>
@@ -310,7 +333,7 @@ function EditFlight() {
               <Field label="Fecha">
                 <input
                   type="date"
-                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                   value={data.returnDate}
                   onChange={(e) => setData({ ...data, returnDate: e.target.value })}
                 />
@@ -318,7 +341,7 @@ function EditFlight() {
               <Field label="Hora salida">
                 <input
                   type="time"
-                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+                  className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
                   value={data.returnTime}
                   onChange={(e) => setData({ ...data, returnTime: e.target.value })}
                 />
@@ -368,7 +391,7 @@ function EditFlight() {
           <Field label={`Precio de venta (original ${S(flight.originalPrice)})`} required>
             <input
               type="number"
-              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
               value={data.price === 0 ? "" : data.price}
               onChange={(e) =>
                 setData({ ...data, price: e.target.value === "" ? 0 : Number(e.target.value) })
@@ -384,7 +407,7 @@ function EditFlight() {
         <Field label="Cargo estimado de la aerolínea (opcional)">
           <input
             type="number"
-            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+            className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
             value={data.cargoEstimado ?? ""}
             onChange={(e) =>
               setData({ ...data, cargoEstimado: e.target.value ? Number(e.target.value) : null })
@@ -398,7 +421,7 @@ function EditFlight() {
             maxLength={280}
             value={data.notaVendedor}
             onChange={(e) => setData({ ...data, notaVendedor: e.target.value })}
-            className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+            className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
           />
         </Field>
 
@@ -406,14 +429,14 @@ function EditFlight() {
             claro cómo cambia el neto apenas se toca el precio o el cargo. */}
         <div className="tarjeta-boleto space-y-3 p-6">
           <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            Desglose — neto estimado
+            Desglose del neto estimado
           </div>
           <ReceiptRow
             label={`Precio de venta (${tieneRegreso ? tramoAVenderLabel(data.tramoAVender) : "solo ida"})`}
             value={S(data.price)}
           />
           <ReceiptRow
-            label={`Comisión Traspaso (${Math.round(PLATFORM_COMMISSION_RATE * 100)}%)`}
+            label={`Comisión Buelazo (${Math.round(PLATFORM_COMMISSION_RATE * 100)}%)`}
             value={`− ${S(comision)}`}
           />
           {data.cargoEstimado != null ? (
@@ -426,7 +449,7 @@ function EditFlight() {
             <ReceiptRow
               label="Cargo estimado de aerolínea"
               value={S(0)}
-              note="No ingresaste un estimado — tu neto real podría ser menor a este cálculo."
+              note="No ingresaste un estimado. Tu neto real podría ser menor a este cálculo."
               warn
             />
           )}
@@ -455,7 +478,7 @@ function EditFlight() {
         <button
           onClick={guardar}
           disabled={guardando || !!precioError}
-          className="inline-flex flex-1 sm:flex-none justify-center items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-10 py-3.5 text-sm font-bold text-white shadow-sm transition-transform hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100"
+          className="inline-flex flex-1 sm:flex-none justify-center items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-10 py-3.5 text-sm font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:active:scale-100"
         >
           {guardando ? (
             <>

@@ -1,8 +1,9 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { CheckCircle2 } from "lucide-react";
 import { useAuth } from "./auth-context";
+import { useAuthModal } from "./auth-modal-context";
 import { getMySavedFlightIds, saveFlight, unsaveFlight } from "./services/saved-flights";
 import { incrementFlightCounter } from "./services/flights";
 
@@ -19,7 +20,14 @@ export function SavedProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const isRealUser = !!user && !user.id.startsWith("sim-");
   const [savedIds, setSavedIds] = useState<string[]>([]);
+  const { openAuthModal } = useAuthModal();
   const navigate = useNavigate();
+  // Intención pendiente cuando se pide login desde el corazón de guardar —
+  // el modal abre en el lugar (sin navegar), así que apenas detecta sesión
+  // real acá abajo simplemente se reintenta el mismo guardado, en memoria,
+  // sin pasar por localStorage (eso solo hacía falta cuando login era una
+  // página aparte a la que había que volver).
+  const pendingToggleRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isRealUser) {
@@ -29,6 +37,12 @@ export function SavedProvider({ children }: { children: ReactNode }) {
     getMySavedFlightIds(user!.id)
       .then(setSavedIds)
       .catch(() => {});
+    if (pendingToggleRef.current) {
+      const flightId = pendingToggleRef.current;
+      pendingToggleRef.current = null;
+      performToggle(flightId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRealUser, user]);
 
   function isSaved(flightId: string) {
@@ -36,23 +50,34 @@ export function SavedProvider({ children }: { children: ReactNode }) {
   }
 
   function toggleSaved(flightId: string) {
+    // Sin sesión no hay nada real que guardar (no persiste en ningún lado) —
+    // antes esto igual mostraba el toast de éxito, dando a entender que sí se
+    // guardó. Ahora abre el modal de login en el lugar (sin navegar) en vez
+    // de fingir que funcionó o mandar a una página aparte.
+    if (!isRealUser) {
+      pendingToggleRef.current = flightId;
+      openAuthModal("login");
+      return;
+    }
+    performToggle(flightId);
+  }
+
+  function performToggle(flightId: string) {
     const yaGuardado = savedIds.includes(flightId);
     setSavedIds((prev) =>
       yaGuardado ? prev.filter((id) => id !== flightId) : [...prev, flightId],
     );
 
-    if (isRealUser) {
-      const op = yaGuardado ? unsaveFlight(user!.id, flightId) : saveFlight(user!.id, flightId);
-      op.then(() => {
-        incrementFlightCounter(flightId, "saved_count", yaGuardado ? -1 : 1);
-      }).catch(() => {
-        // Revierte el optimistic update si falló en el servidor.
-        setSavedIds((prev) =>
-          yaGuardado ? [...prev, flightId] : prev.filter((id) => id !== flightId),
-        );
-        toast.error("No se pudo actualizar tus guardados.");
-      });
-    }
+    const op = yaGuardado ? unsaveFlight(user!.id, flightId) : saveFlight(user!.id, flightId);
+    op.then(() => {
+      incrementFlightCounter(flightId, "saved_count", yaGuardado ? -1 : 1);
+    }).catch(() => {
+      // Revierte el optimistic update si falló en el servidor.
+      setSavedIds((prev) =>
+        yaGuardado ? [...prev, flightId] : prev.filter((id) => id !== flightId),
+      );
+      toast.error("No se pudo actualizar tus guardados.");
+    });
 
     if (yaGuardado) {
       toast("Quitado de guardados");

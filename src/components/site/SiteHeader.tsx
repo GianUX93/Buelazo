@@ -1,19 +1,11 @@
-import { Link } from "@tanstack/react-router";
-import {
-  Bell,
-  Menu,
-  X,
-  Megaphone,
-  ShoppingBag,
-  User,
-  LogOut,
-  ChevronDown,
-  ShieldCheck,
-} from "lucide-react";
-import { useState } from "react";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
+import { Bell, Menu, X, ShoppingBag, User, LogOut, ChevronDown, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAlerts } from "@/lib/alerts-context";
 import { useAuth } from "@/lib/auth-context";
+import { useHeaderVisual } from "@/lib/header-visual-context";
+import { useAuthModal } from "@/lib/auth-modal-context";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -37,35 +29,109 @@ export function SiteHeader() {
   const [confirmSignOutOpen, setConfirmSignOutOpen] = useState(false);
   const { alertas, unreadCount, markRead, markAllRead } = useAlerts();
   const { user, profile, signOut } = useAuth();
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const isExplore = pathname === "/explore";
+  const { heroVisible } = useHeaderVisual();
+  const { openAuthModal, closeAuthModal } = useAuthModal();
+  const [scrolled, setScrolled] = useState(false);
+
+  // Sobre el hero con foto del modo Manual de Explorar, el header flota
+  // transparente para no tapar la imagen; apenas el usuario scrollea más allá
+  // del hero, cambia a la versión sólida y sticky. heroVisible (avisado por
+  // explore.tsx) evita que quede transparente cuando no hay hero detrás (modo
+  // Agéntico), donde se vería en blanco sobre blanco.
+  useEffect(() => {
+    if (!isExplore) {
+      setScrolled(false);
+      return;
+    }
+    function onScroll() {
+      setScrolled(window.scrollY > 200);
+    }
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [isExplore]);
+
+  const transparent = isExplore && heroVisible && !scrolled;
+
+  // Rutas que exigen sesión (ver useRequireAuth) — cerrar sesión estando en
+  // una de estas dejaba a la vista el modal de login abriéndose solo sobre la
+  // página, y si se cerraba sin loguearse, la pantalla de "Necesitas iniciar
+  // sesión" detrás. Ninguna de las dos debería verse: apenas se cierra sesión
+  // ahí, se saca al usuario a un lugar que no le va a pedir login de nuevo.
+  // /publish no está en esta lista a propósito: maneja la pérdida de sesión
+  // con su propia lógica por paso (ver publish.tsx).
+  function esRutaProtegida(path: string) {
+    return (
+      path === "/dashboard" ||
+      path === "/profile" ||
+      path === "/admin/revisiones" ||
+      path.startsWith("/edit-flight/")
+    );
+  }
 
   async function handleSignOut() {
     setConfirmSignOutOpen(false);
     setOpen(false);
+    const debeRedirigir = esRutaProtegida(pathname);
     await signOut();
     toast.success("Sesión cerrada correctamente");
+    if (debeRedirigir) {
+      // `user` pasando a null puede disparar el useRequireAuth() de la propia
+      // página (dashboard/profile/etc.) y abrir el modal de login justo antes
+      // de que este navigate surta efecto — closeAuthModal() es la red de
+      // seguridad para que no quede abierto flotando sobre el home.
+      closeAuthModal();
+      navigate({ to: "/" });
+    }
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--color-ink)]/12 bg-background/95 shadow-[0_1px_0_0_rgba(26,30,43,0.04)] backdrop-blur-xl">
+    <header
+      className={
+        isExplore
+          ? `fixed inset-x-0 top-0 z-40 transition-all duration-700 ease-out ${
+              transparent
+                ? "bg-transparent"
+                : "border-b border-[var(--color-ink)]/12 bg-background shadow-[0_1px_0_0_rgba(26,30,43,0.04)]"
+            }`
+          : "sticky top-0 z-40 border-b border-[var(--color-ink)]/12 bg-background shadow-[0_1px_0_0_rgba(26,30,43,0.04)]"
+      }
+    >
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
-        <Link to="/" className="flex shrink-0 items-center gap-2">
-          <Logo />
-          <span className="font-display text-xl leading-none">Traspaso</span>
-          <span className="hidden rounded-full border border-[var(--color-ink)]/15 px-2 py-0.5 text-[10px] uppercase tracking-widest text-muted-foreground sm:inline-block">
-            beta · pe
-          </span>
+        <Link to="/" className="flex shrink-0 items-center">
+          <img
+            src={transparent ? "/logo-buelazo-white.png" : "/logo-buelazo-dark.png"}
+            alt="Buelazo"
+            className="h-7 w-auto"
+          />
         </Link>
         <nav className="hidden items-center gap-1 md:flex">
-          <NavItem to="/">Inicio</NavItem>
-          <NavItem to="/explore">Explorar vuelos</NavItem>
-          <NavItem to="/trust">Cómo funciona</NavItem>
+          <NavItem to="/" transparent={transparent}>
+            Inicio
+          </NavItem>
+          <NavItem to="/explore" transparent={transparent}>
+            Explorar vuelos
+          </NavItem>
+          <NavItem to="/publish" transparent={transparent}>
+            Vender vuelos
+          </NavItem>
+          <NavItem to="/trust" transparent={transparent}>
+            Cómo funciona
+          </NavItem>
         </nav>
         <div className="hidden items-center gap-3 md:flex">
           {user && (
             <DropdownMenu onOpenChange={(o) => !o && markAllRead()}>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="relative grid h-9 w-9 place-items-center rounded-full border border-[var(--color-ink)]/10 bg-surface-2 transition-colors hover:bg-background"
+                  className={`relative grid h-9 w-9 place-items-center rounded-full border transition-colors after:absolute after:-inset-1 after:content-[''] ${
+                    transparent
+                      ? "border-white/30 bg-white/10 text-white hover:bg-white/20"
+                      : "border-[var(--color-ink)]/10 bg-surface-2 hover:bg-background"
+                  }`}
                   aria-label="Notificaciones"
                 >
                   <Bell className="h-4 w-4" />
@@ -134,17 +200,24 @@ export function SiteHeader() {
           {user ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 ring-1 ring-[var(--color-ink)]/12 ring-offset-2 ring-offset-background transition-shadow hover:ring-[var(--color-primary-token)]/50">
+                <button
+                  className={`flex items-center gap-1.5 rounded-full py-0.5 pl-0.5 pr-2 ring-1 ring-offset-2 transition-shadow hover:ring-[var(--color-primary-token)]/50 ${
+                    transparent
+                      ? "ring-white/40 ring-offset-transparent"
+                      : "ring-[var(--color-ink)]/12 ring-offset-background"
+                  }`}
+                >
                   <Avatar className="h-8 w-8">
-                    <AvatarImage
-                      src={profile?.avatar_url || `https://i.pravatar.cc/150?u=${user.id}`}
-                      alt={profile?.first_name || "U"}
-                    />
+                    {profile?.avatar_url && (
+                      <AvatarImage src={profile.avatar_url} alt={profile.first_name || "U"} />
+                    )}
                     <AvatarFallback className="bg-surface-2 text-xs font-medium">
                       {(profile?.first_name?.[0] || "U").toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
-                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 ${transparent ? "text-white/80" : "text-muted-foreground"}`}
+                  />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
@@ -156,18 +229,13 @@ export function SiteHeader() {
                 </div>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild className="focus:bg-surface-2! focus:text-inherit!">
-                  <Link to="/publish" className="flex items-center gap-2">
-                    <Megaphone className="h-4 w-4 text-muted-foreground" /> Publicar pasaje
+                  <Link to="/profile" className="flex items-center gap-2">
+                    <User className="h-4 w-4 text-muted-foreground" /> Mi perfil
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild className="focus:bg-surface-2! focus:text-inherit!">
                   <Link to="/dashboard" className="flex items-center gap-2">
                     <ShoppingBag className="h-4 w-4 text-muted-foreground" /> Mis operaciones
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild className="focus:bg-surface-2! focus:text-inherit!">
-                  <Link to="/profile" className="flex items-center gap-2">
-                    <User className="h-4 w-4 text-muted-foreground" /> Mi perfil
                   </Link>
                 </DropdownMenuItem>
                 {profile?.is_admin && (
@@ -187,17 +255,22 @@ export function SiteHeader() {
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
-            <Link
-              to="/login"
+            <button
+              type="button"
+              onClick={() => openAuthModal("login")}
               className="rounded-full bg-[var(--color-primary-token)] px-4 py-2 text-sm font-bold text-white transition-colors hover:bg-[var(--color-primary-token)]/90"
             >
               Ingresar
-            </Link>
+            </button>
           )}
         </div>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[var(--color-ink)]/10 bg-surface-2 md:hidden"
+          className={`relative grid h-9 w-9 shrink-0 place-items-center rounded-full border md:hidden after:absolute after:-inset-1 after:content-[''] ${
+            transparent
+              ? "border-white/30 bg-white/10 text-white"
+              : "border-[var(--color-ink)]/10 bg-surface-2"
+          }`}
           aria-label="Menú"
         >
           {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -212,6 +285,9 @@ export function SiteHeader() {
             <MobileItem to="/explore" onClick={() => setOpen(false)}>
               Explorar vuelos
             </MobileItem>
+            <MobileItem to="/publish" onClick={() => setOpen(false)}>
+              Vender vuelos
+            </MobileItem>
             <MobileItem to="/trust" onClick={() => setOpen(false)}>
               Cómo funciona
             </MobileItem>
@@ -220,8 +296,8 @@ export function SiteHeader() {
 
             {user ? (
               <>
-                <MobileItem to="/publish" onClick={() => setOpen(false)}>
-                  Publicar pasaje
+                <MobileItem to="/profile" onClick={() => setOpen(false)}>
+                  Mi perfil
                 </MobileItem>
                 <MobileItem to="/dashboard" onClick={() => setOpen(false)}>
                   Mis operaciones
@@ -231,9 +307,6 @@ export function SiteHeader() {
                     </span>
                   )}
                 </MobileItem>
-                <MobileItem to="/profile" onClick={() => setOpen(false)}>
-                  Mi perfil
-                </MobileItem>
                 <button
                   onClick={() => setConfirmSignOutOpen(true)}
                   className="rounded-lg px-3 py-2.5 text-left text-sm font-medium text-[var(--color-primary-token)] transition-colors hover:bg-background"
@@ -242,13 +315,16 @@ export function SiteHeader() {
                 </button>
               </>
             ) : (
-              <Link
-                to="/login"
-                onClick={() => setOpen(false)}
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  openAuthModal("login");
+                }}
                 className="rounded-full bg-[var(--color-primary-token)] px-4 py-2.5 text-center text-sm font-bold text-white transition-colors hover:bg-[var(--color-primary-token)]/90"
               >
                 Ingresar
-              </Link>
+              </button>
             )}
           </div>
         </div>
@@ -273,7 +349,7 @@ export function SiteHeader() {
             <button
               type="button"
               onClick={handleSignOut}
-              className="flex-1 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02]"
+              className="flex-1 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
             >
               Cerrar sesión
             </button>
@@ -284,12 +360,28 @@ export function SiteHeader() {
   );
 }
 
-function NavItem({ to, children }: { to: string; children: React.ReactNode }) {
+function NavItem({
+  to,
+  children,
+  transparent,
+}: {
+  to: string;
+  children: React.ReactNode;
+  transparent?: boolean;
+}) {
   return (
     <Link
       to={to}
-      className="rounded-md px-3 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-      activeProps={{ className: "text-[var(--color-primary-token)]! font-bold" }}
+      className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+        transparent
+          ? "text-white/80 hover:text-white"
+          : "text-muted-foreground hover:text-foreground"
+      }`}
+      activeProps={{
+        className: transparent
+          ? "text-white! font-bold"
+          : "text-[var(--color-primary-token)]! font-bold",
+      }}
     >
       {children}
     </Link>
@@ -316,20 +408,5 @@ function MobileItem({
     >
       {children}
     </Link>
-  );
-}
-
-function Logo() {
-  return (
-    <span
-      className="grid h-7 w-7 place-items-center rounded-lg"
-      style={{
-        background: "linear-gradient(135deg, var(--color-signal), oklch(0.72 0.12 45))",
-      }}
-    >
-      <span className="font-display text-[15px] leading-none text-[var(--color-signal-foreground)]">
-        t
-      </span>
-    </span>
   );
 }

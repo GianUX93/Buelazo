@@ -40,6 +40,7 @@
   --color-signal-foreground: var(--signal-foreground);
   --color-warn: var(--warn);
   --color-warn-foreground: var(--warn-foreground);
+  --color-warning-ink: var(--warning-ink);
   --color-success: var(--success);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
@@ -49,6 +50,11 @@
   --font-sans:
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Ease-out con más "punch" que el cubic-bezier(0.4,0,0.2,1) por defecto de
+     Tailwind — usarlo en los CTAs de mayor visibilidad (pagar, liberar pago),
+     no reemplazar en bloque todas las transiciones de hover menores. */
+  --ease-snappy: cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 :root {
@@ -90,8 +96,13 @@
   --signal: var(--color-secondary-token); 
   --signal-foreground: #FFFFFF;
 
-  --warn: var(--color-warning-token); 
+  --warn: var(--color-warning-token);
   --warn-foreground: var(--color-ink); /* Ink sobre amarillo */
+  /* Mismo matiz que --color-warning-token (43°), oscurecido a L≈28% para dar
+     ~5.16:1 de contraste sobre blanco (AA) — el amarillo original mide ~1.5:1
+     como texto/ícono sobre blanco, casi invisible. Usar esta variante siempre
+     que el amarillo de marca sea el color de un texto o ícono, nunca de un fondo. */
+  --warning-ink: #8F6600;
 
   --success: var(--color-secondary-token);
 
@@ -106,6 +117,21 @@
 @layer base {
   * {
     border-color: var(--color-border);
+  }
+  html {
+    /* Reserva siempre el ancho de la scrollbar, con o sin ella visible —
+       sin esto, el scroll-lock de Radix (Popover/Dropdown/Dialog) le agrega un
+       padding-right compensatorio al body al abrirse, pero el header fixed
+       de Explorar no se desplaza igual, generando un salto de layout visible. */
+    scrollbar-gutter: stable;
+  }
+  /* react-remove-scroll (el scroll-lock que usan los Dialog de Radix) le
+     agrega a body un margin-right con !important al abrirse, para compensar
+     la scrollbar que "desaparece" — pero como ya reservamos ese espacio
+     arriba con scrollbar-gutter, ese margin extra es lo que en realidad
+     empuja todo el contenido hacia la izquierda. Se anula explícitamente. */
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
   }
   html,
   body {
@@ -142,9 +168,11 @@
   -webkit-mask-composite: source-in;
   mask-size: 100% 100%;
 
-  &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 10px 15px -3px rgba(26, 30, 43, 0.1), 0 4px 6px -2px rgba(26, 30, 43, 0.05);
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 15px -3px rgba(26, 30, 43, 0.1), 0 4px 6px -2px rgba(26, 30, 43, 0.05);
+    }
   }
 }
 
@@ -163,11 +191,170 @@
   }
 }
 
+@utility animate-marquee {
+  animation: marquee-scroll 85s linear infinite;
+}
+
+@keyframes marquee-scroll {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    /* La pista duplica la lista una vez (2 copias) — recorrer el 50% completa
+       un ciclo exacto y el loop queda invisible. */
+    transform: translateX(-50%);
+  }
+}
+
+@utility animate-text-shimmer {
+  animation: text-shimmer-sweep 1.6s linear infinite;
+}
+
+/* Transición de bienvenida → conversación del chat de lucIA: CSS puro con
+   `forwards` (no JS/GSAP con callbacks) — el peor caso posible si algo la
+   interrumpe es que no se vea la animación, nunca que el panel quede
+   invisible para siempre (fue justo el bug que reemplaza esto). */
+@utility animate-panel-in {
+  animation: panel-fade-in 0.3s ease-out forwards;
+}
+
+@keyframes panel-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-msg-in {
+  animation: msg-fade-in 0.3s ease-out forwards;
+}
+
+@keyframes msg-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes text-shimmer-sweep {
+  0% {
+    background-position: 200% center;
+  }
+  100% {
+    background-position: -200% center;
+  }
+}
+
+/* Demo pasivo de conversación de la home (sección "lucIA"): loop de 9s que
+   simula usuario → pensando → respuesta, sin depender de JS. Los 3 elementos
+   comparten la misma duración/ciclo para quedar sincronizados entre sí. */
+@utility animate-demo-user {
+  animation: demo-user-cycle 9s ease-in-out infinite;
+}
+
+@keyframes demo-user-cycle {
+  0%,
+  5% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  11%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
+@utility animate-demo-thinking {
+  animation: demo-thinking-cycle 9s ease-in-out infinite;
+}
+
+@keyframes demo-thinking-cycle {
+  0%,
+  13% {
+    opacity: 0;
+  }
+  17%,
+  36% {
+    opacity: 1;
+  }
+  40%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@utility animate-demo-agent {
+  animation: demo-agent-cycle 9s ease-in-out infinite;
+}
+
+@keyframes demo-agent-cycle {
+  0%,
+  42% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  47%,
+  94% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tarjeta-boleto:hover {
     transform: none;
   }
+  .animate-marquee {
+    animation: none;
+  }
+  .animate-text-shimmer {
+    animation: none;
+  }
   .animate-pulse-last-call {
+    animation: none;
+  }
+  /* El demo pasivo de la home queda fijo mostrando la respuesta final en vez
+     de repetir el ciclo — sigue siendo informativo sin movimiento. */
+  .animate-demo-user,
+  .animate-demo-agent {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .animate-demo-thinking {
+    animation: none;
+    opacity: 0;
+  }
+  .animate-panel-in,
+  .animate-msg-in {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  /* Tailwind's stock animate-ping/animate-pulse/animate-bounce (última llamada,
+     skeletons, indicador de "escribiendo") don't get a reduced-motion guard by
+     default. Removing the motion still leaves the color/shape/position doing
+     the communicating, so nothing meaningful is lost by holding them static. */
+  .animate-ping,
+  .animate-pulse,
+  .animate-bounce {
     animation: none;
   }
 }

@@ -6,7 +6,14 @@ import { Check, ChevronRight, Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const DropdownMenu = DropdownMenuPrimitive.Root;
+// modal=false por defecto: estos menús son overlays livianos (acciones de
+// card, avatar, notificaciones), no diálogos de pantalla completa — el modo
+// modal de Radix bloquea el scroll del body al abrirse, lo que genera un
+// salto de layout visible en toda la app. Un caller puede seguir pasando
+// modal explícitamente si alguna vez necesita el comportamiento modal real.
+const DropdownMenu = (props: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) => (
+  <DropdownMenuPrimitive.Root modal={false} {...props} />
+);
 
 const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 

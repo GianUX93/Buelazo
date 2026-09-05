@@ -4,13 +4,13 @@ import { ShieldCheck, Lock, FileCheck2, Scale, PhoneCall } from "lucide-react";
 export const Route = createFileRoute("/trust")({
   head: () => ({
     meta: [
-      { title: "Cómo funciona el traspaso — Traspaso" },
+      { title: "Cómo funciona el traspaso — Buelazo" },
       {
         name: "description",
         content:
           "Cómo verificamos el endoso de tu pasaje, protegemos tu dinero con escrow y respaldamos el trámite legalmente en Perú.",
       },
-      { property: "og:title", content: "Cómo protegemos tu traspaso — Traspaso" },
+      { property: "og:title", content: "Cómo protegemos tu traspaso — Buelazo" },
       {
         property: "og:description",
         content:
@@ -31,9 +31,8 @@ function Trust() {
         Tu dinero no se mueve hasta que la aerolínea confirma.
       </h1>
       <p className="mt-4 max-w-2xl text-lg text-muted-foreground">
-        Traspaso opera como un escrow: retenemos el pago del comprador y solo lo
-        liberamos al vendedor cuando el boleto ya está a nombre del nuevo pasajero
-        en el sistema de la aerolínea.
+        Buelazo opera como un escrow: retenemos el pago del comprador y solo lo liberamos al
+        vendedor cuando el boleto ya está a nombre del nuevo pasajero en el sistema de la aerolínea.
       </p>
 
       <div className="mt-12 grid gap-4 md:grid-cols-2">
@@ -64,7 +63,7 @@ function Trust() {
         <div className="mt-6 divide-y divide-hairline">
           <Faq
             q="¿Qué pasa si la aerolínea rechaza el endoso?"
-            a="Se te reembolsa el 100% del pago. El vendedor no recibe nada. Traspaso asume el costo de gestión."
+            a="Se te reembolsa el 100% del pago. El vendedor no recibe nada. Buelazo asume el costo de gestión."
           />
           <Faq
             q="¿Es legal transferir un pasaje en Perú?"
@@ -72,7 +71,7 @@ function Trust() {
           />
           <Faq
             q="¿Cuánto demora el trámite?"
-            a="Entre 1 y 3 horas en promedio. Por eso los vuelos que salen en menos de 24h viven en la sección 'Última llamada' con advertencia explícita — no los mezclamos con las ofertas estándar."
+            a="Entre 1 y 3 horas en promedio. Por eso los vuelos que salen en menos de 24h viven en la sección 'Última llamada' con advertencia explícita. No los mezclamos con las ofertas estándar."
           />
           <Faq
             q="¿Qué pasa si un vuelo ya no se puede endosar a tiempo?"
@@ -103,15 +102,7 @@ function Trust() {
   );
 }
 
-function Pillar({
-  icon,
-  title,
-  desc,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-}) {
+function Pillar({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
   return (
     <div className="rounded-3xl border border-hairline bg-surface p-6">
       <div className="grid h-10 w-10 place-items-center rounded-full bg-signal/15 text-signal">

@@ -19,7 +19,7 @@ export function PhoneInput({
           value={prefijo}
           onChange={(e) => onChange(e.target.value, numero.slice(0, maxLen))}
           aria-label="Prefijo telefónico del país"
-          className="h-full w-[96px] appearance-none rounded-xl border border-border bg-background py-3 pl-3 pr-6 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+          className="h-full w-[96px] appearance-none rounded-xl border border-border bg-background py-3 pl-3 pr-6 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
         >
           {PREFIJOS_TELEFONO.map((p) => (
             <option key={p.code} value={p.code} aria-label={`${p.country} ${p.code}`}>
@@ -34,7 +34,7 @@ export function PhoneInput({
         inputMode="numeric"
         placeholder="999 999 999"
         maxLength={maxLen}
-        className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+        className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
         value={numero}
         onChange={(e) => onChange(prefijo, e.target.value.replace(/\D/g, "").slice(0, maxLen))}
       />

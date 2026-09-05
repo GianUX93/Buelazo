@@ -8,6 +8,7 @@ import { getPendingFlights, approveFlight, rejectFlight } from "@/lib/services/f
 import { getPendingCargoReviews, resolveCargoReview } from "@/lib/services/transactions";
 import { S, fmtDate } from "@/lib/flight-utils";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AuthRequiredPlaceholder } from "@/components/site/auth/AuthRequiredPlaceholder";
 
 const MOTIVOS_RECHAZO = [
   "Comprobante ilegible o incompleto",
@@ -19,13 +20,13 @@ const MOTIVOS_RECHAZO = [
 
 export const Route = createFileRoute("/admin/revisiones")({
   head: () => ({
-    meta: [{ title: "Revisiones — Traspaso" }],
+    meta: [{ title: "Revisiones — Buelazo" }],
   }),
   component: AdminRevisiones,
 });
 
 function AdminRevisiones() {
-  const { ready } = useRequireAuth();
+  const { ready, isLoading: authLoading } = useRequireAuth();
   const { profile } = useAuth();
   const queryClient = useQueryClient();
   const [procesandoId, setProcesandoId] = useState<string | null>(null);
@@ -45,7 +46,8 @@ function AdminRevisiones() {
     enabled: !!profile?.is_admin,
   });
 
-  if (!ready) return null;
+  if (authLoading) return null;
+  if (!ready) return <AuthRequiredPlaceholder />;
 
   if (!profile?.is_admin) {
     return (
@@ -71,7 +73,7 @@ function AdminRevisiones() {
     setProcesandoId(id);
     try {
       await approveFlight(id);
-      toast.success("Publicación aprobada — ya está visible en el marketplace.");
+      toast.success("Publicación aprobada. Ya está visible en el marketplace.");
       queryClient.invalidateQueries({ queryKey: ["flights", "pendientes"] });
     } catch {
       toast.error("No se pudo completar la acción. Intenta de nuevo.");
@@ -215,7 +217,7 @@ function AdminRevisiones() {
                     type="button"
                     disabled={procesando}
                     onClick={() => aprobar(f.id)}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-secondary-token)] px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-secondary-token)] px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
                   >
                     {procesando ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -236,7 +238,7 @@ function AdminRevisiones() {
           Cargos de aerolínea pendientes de revisión
         </h2>
         <p className="mt-2 text-sm font-medium text-muted-foreground">
-          El vendedor reportó un cargo que supera el 50% del precio de venta — confírmalo con la
+          El vendedor reportó un cargo que supera el 50% del precio de venta. Confírmalo con la
           evidencia antes de aceptarlo.
         </p>
 
@@ -318,7 +320,7 @@ function AdminRevisiones() {
                       type="button"
                       disabled={procesandoCargo}
                       onClick={() => resolverCargo(t.id, "aceptado")}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-secondary-token)] px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-secondary-token)] px-5 py-2.5 text-xs font-bold text-white shadow-sm transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
                     >
                       {procesandoCargo ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -374,7 +376,7 @@ function AdminRevisiones() {
               value={detalle}
               onChange={(e) => setDetalle(e.target.value)}
               placeholder="Agrega cualquier detalle que ayude al vendedor a corregirlo…"
-              className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+              className="w-full resize-none rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
             />
           </label>
 
@@ -390,7 +392,7 @@ function AdminRevisiones() {
               type="button"
               disabled={!motivo || procesandoId === rejectModal?.id}
               onClick={confirmarRechazo}
-              className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40"
+              className="flex-1 inline-flex items-center justify-center gap-2 rounded-full bg-red-500 px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40"
             >
               Rechazar publicación
             </button>

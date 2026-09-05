@@ -1,4 +1,4 @@
-// Mock inventory for the Traspaso prototype.
+// Mock inventory for the Buelazo prototype.
 // Status is computed relative to the departure of the tramo actually being sold
 // (see `tramoVigente` in flight-utils) and the persisted business flag `sellerAllowsLastCall`.
 // - active: > 24h to departure and endoso is viable
@@ -92,13 +92,18 @@ export const cargoAerolineaConfirmadoDefault = (): CargoAerolineaConfirmado => (
   revisionManualRequerida: false,
 });
 
+// Sin rating/reviews a propósito: la mayoría de vendedores usa la plataforma
+// una sola vez (vendió el pasaje que ya no podía usar), así que un promedio
+// de estrellas casi siempre tendría 0-1 reseñas — una señal de confianza que
+// no aporta nada real y hasta resta (una estrella vacía en cada card sugiere
+// "nadie ha probado a este vendedor" cuando el riesgo real ya está mitigado
+// por otro lado: revisión manual + escrow + confirmación del comprador). La
+// señal de confianza que sí importa es `verifiedId` (identidad verificada).
 export interface Seller {
   id: string;
   name: string;
   avatar: string;
   avatarUrl: string;
-  rating: number;
-  reviews: number;
   verifiedId: boolean;
   memberSince: string;
 }
@@ -114,6 +119,10 @@ export interface Flight {
   originalPrice: number; // soles
   resalePrice: number; // soles
   baggage: "solo cabina" | "23kg incluido" | "cabina + 23kg";
+  // Tarifa específica de la aerolínea (ej. "Light", "Basic") — catálogo por
+  // aerolínea en flight-utils.ts. Opcional: los vuelos mock anteriores a este
+  // campo no lo tienen, y no es obligatorio mostrarlo si falta.
+  fareType?: string;
   // El asiento se define por tramo — el vendedor puede tener sillas distintas en ida y vuelta.
   // null cuando ese tramo no forma parte de esta oferta (ej. tramoAVender = "regreso").
   asientoIda: Asiento | null;
@@ -131,6 +140,9 @@ export interface Flight {
   // revisor en /admin/revisiones al rechazar la publicación.
   rejectionReason?: string;
   rejectionDetail?: string;
+  // Cuántas veces fue rechazada en total (incluye rechazos anteriores ya corregidos) —
+  // al llegar a 2, ya no se puede editar y reenviar a revisión (ver dashboard.tsx).
+  rejectionCount?: number;
   datosPasajero: DatosPasajero;
   cargoAerolineaEstimado: CargoAerolineaEstimado;
 }
@@ -152,8 +164,6 @@ const sellers: Seller[] = [
     name: "Camila R.",
     avatar: "CR",
     avatarUrl: "https://i.pravatar.cc/150?img=47",
-    rating: 4.9,
-    reviews: 27,
     verifiedId: true,
     memberSince: "2024",
   },
@@ -162,8 +172,6 @@ const sellers: Seller[] = [
     name: "Diego M.",
     avatar: "DM",
     avatarUrl: "https://i.pravatar.cc/150?img=12",
-    rating: 4.8,
-    reviews: 12,
     verifiedId: true,
     memberSince: "2025",
   },
@@ -172,8 +180,6 @@ const sellers: Seller[] = [
     name: "Valeria P.",
     avatar: "VP",
     avatarUrl: "https://i.pravatar.cc/150?img=25",
-    rating: 5.0,
-    reviews: 41,
     verifiedId: true,
     memberSince: "2023",
   },
@@ -182,8 +188,6 @@ const sellers: Seller[] = [
     name: "Rodrigo A.",
     avatar: "RA",
     avatarUrl: "https://i.pravatar.cc/150?img=33",
-    rating: 4.6,
-    reviews: 8,
     verifiedId: false,
     memberSince: "2025",
   },
@@ -192,8 +196,6 @@ const sellers: Seller[] = [
     name: "Lucía Q.",
     avatar: "LQ",
     avatarUrl: "https://i.pravatar.cc/150?img=44",
-    rating: 4.95,
-    reviews: 63,
     verifiedId: true,
     memberSince: "2022",
   },
@@ -204,8 +206,6 @@ const sellers: Seller[] = [
     name: "Andrea Salazar",
     avatar: "AS",
     avatarUrl: "https://i.pravatar.cc/150?img=5",
-    rating: 4.85,
-    reviews: 12,
     verifiedId: true,
     memberSince: "2024",
   },
@@ -604,6 +604,87 @@ export const flights: Flight[] = [
     datosPasajero: pasajeros.andrea,
     cargoAerolineaEstimado: cargoAerolineaEstimadoDefault(),
   },
+  {
+    id: "f-013",
+    tipoBoleto: "solo_ida",
+    tramoIda: {
+      origin: airports.LIM,
+      destination: airports.CUZ,
+      departureAt: hoursFromNow(36),
+      durationMin: 85,
+    },
+    tramoRegreso: null,
+    tramoAVender: "ida",
+    airline: "Sky Airline",
+    flightNumber: "H2 412",
+    originalPrice: 260,
+    resalePrice: 129,
+    baggage: "23kg incluido",
+    asientoIda: { tipo: "aleatorio", categoria: null, numero: null },
+    asientoRegreso: null,
+    seller: sellers[1],
+    sellerAllowsLastCall: true,
+    createdAt: hoursFromNow(-10),
+    views: 41,
+    interested: 3,
+    savedCount: 6,
+    datosPasajero: pasajeros.andrea,
+    cargoAerolineaEstimado: cargoAerolineaEstimadoDefault(),
+  },
+  {
+    id: "f-014",
+    tipoBoleto: "solo_ida",
+    tramoIda: {
+      origin: airports.LIM,
+      destination: airports.PIU,
+      departureAt: hoursFromNow(60),
+      durationMin: 90,
+    },
+    tramoRegreso: null,
+    tramoAVender: "ida",
+    airline: "LATAM",
+    flightNumber: "LA 2038",
+    originalPrice: 290,
+    resalePrice: 155,
+    baggage: "23kg incluido",
+    asientoIda: { tipo: "seleccionado", categoria: "pasillo", numero: "10C" },
+    asientoRegreso: null,
+    seller: sellers[3],
+    sellerAllowsLastCall: true,
+    createdAt: hoursFromNow(-20),
+    views: 28,
+    interested: 2,
+    savedCount: 4,
+    datosPasajero: pasajeros.andrea,
+    cargoAerolineaEstimado: cargoAerolineaEstimadoDefault(),
+  },
+  {
+    id: "f-015",
+    tipoBoleto: "solo_ida",
+    tramoIda: {
+      origin: airports.LIM,
+      destination: airports.CUZ,
+      departureAt: hoursFromNow(180),
+      durationMin: 85,
+    },
+    tramoRegreso: null,
+    tramoAVender: "ida",
+    airline: "JetSmart",
+    flightNumber: "JA 771",
+    originalPrice: 220,
+    resalePrice: 98,
+    baggage: "solo cabina",
+    asientoIda: { tipo: "aleatorio", categoria: null, numero: null },
+    asientoRegreso: null,
+    seller: sellers[2],
+    sellerAllowsLastCall: true,
+    createdAt: hoursFromNow(-5),
+    views: 14,
+    interested: 1,
+    savedCount: 1,
+    datosPasajero: pasajeros.andrea,
+    cargoAerolineaEstimado: cargoAerolineaEstimadoDefault(),
+  },
 ];
 
 export const airportsList = Object.values(airports);
@@ -694,10 +775,6 @@ export const currentUser = {
   avatarUrl: "https://i.pravatar.cc/150?img=5",
   verifiedId: true,
   memberSince: "2024",
-  ratingBuyer: 4.9,
-  reviewsBuyer: 8,
-  ratingSeller: 4.85,
-  reviewsSeller: 12,
   dni: "•••••4821",
   phone: "+51 9•• ••1 342",
   email: "andrea@•••.pe",
@@ -724,5 +801,54 @@ export const testimonials = [
     role: "Compró Cusco → Lima",
     quote:
       "La sección de última llamada es honesta: te avisa cuánto tiempo real queda para completar el endoso. Nunca sentí que me apuraran a pagar.",
+  },
+  {
+    name: "Valentina R.",
+    avatarUrl: "https://i.pravatar.cc/150?img=32",
+    role: "Creó una alerta de ruta",
+    quote:
+      "No había nada para Arequipa esa semana, así que dejé una alerta. Al día siguiente me llegó la notificación apenas alguien publicó — lo compré antes que nadie.",
+  },
+  {
+    name: "Braulio S.",
+    avatarUrl: "https://i.pravatar.cc/150?img=60",
+    role: "Compró Lima → Tarapoto",
+    quote:
+      "Nunca tuve que dar mi número a nadie. Todo el intercambio con el vendedor fue por el chat interno, incluso cuando la aerolínea pidió una foto de mi DNI.",
+  },
+  {
+    name: "Camila T.",
+    avatarUrl: "https://i.pravatar.cc/150?img=45",
+    role: "Compró con asiento confirmado",
+    quote:
+      "Filtré solo por asientos de ventana ya confirmados. Llegué al aeropuerto y era exactamente el asiento que decía la publicación.",
+  },
+  {
+    name: "Diego M.",
+    avatarUrl: "https://i.pravatar.cc/150?img=33",
+    role: "Guardó vuelos antes de decidir",
+    quote:
+      "Fui guardando tres opciones distintas durante dos días para comparar precios con calma, sin perderlas de vista entre tanta pestaña abierta.",
+  },
+  {
+    name: "Fiorella N.",
+    avatarUrl: "https://i.pravatar.cc/150?img=25",
+    role: "Compró con endoso verificado",
+    quote:
+      "Lo que más me tranquilizó fue ver que el vendedor tenía la identidad verificada antes de pagar. Se nota que revisan las publicaciones.",
+  },
+  {
+    name: "Ismael Ch.",
+    avatarUrl: "https://i.pravatar.cc/150?img=52",
+    role: "Compró Tarapoto → Lima",
+    quote:
+      "El dinero quedó retenido hasta que confirmé que el boleto llegó a mi nombre. Si algo salía mal, no perdía mi plata — esa garantía vale más que el descuento.",
+  },
+  {
+    name: "Lucía Q.",
+    avatarUrl: "https://i.pravatar.cc/150?img=47",
+    role: "Vendió su pasaje en minutos",
+    quote:
+      "Subí mi comprobante de reserva y en menos de cinco minutos ya estaba publicado. No esperaba que fuera tan directo.",
   },
 ];

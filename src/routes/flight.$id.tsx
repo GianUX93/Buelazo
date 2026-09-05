@@ -1,12 +1,13 @@
-import { createFileRoute, Link, notFound, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
   ShieldCheck,
   Lock,
   CheckCircle2,
   Circle,
+  XCircle,
   ArrowRight,
   Plane,
   Info,
@@ -25,7 +26,8 @@ import {
 } from "lucide-react";
 
 import { useSaved } from "@/lib/saved-context";
-import { useAuth, PENDING_PURCHASE_KEY } from "@/lib/auth-context";
+import { useAuth } from "@/lib/auth-context";
+import { useAuthModal } from "@/lib/auth-modal-context";
 import { usePayment } from "@/lib/payment-context";
 import { getFlightById, incrementFlightCounter } from "@/lib/services/flights";
 import { createTransaction, getTransactionForFlight } from "@/lib/services/transactions";
@@ -76,7 +78,7 @@ const METODOS_PAGO: { id: MetodoPago; label: string; desc: string; Icon: typeof 
 ];
 
 const searchSchema = z.object({
-  from: z.enum(["dashboard"]).optional(),
+  from: z.enum(["dashboard", "guardados", "agente"]).optional(),
   tx: z.string().optional(),
   vista: z.enum(["publicados", "proceso"]).optional(),
 });
@@ -87,14 +89,14 @@ export const Route = createFileRoute("/flight/$id")({
     const f = loaderData?.flight;
     if (!f) {
       return {
-        meta: [{ title: "Vuelo no disponible — Traspaso" }, { name: "robots", content: "noindex" }],
+        meta: [{ title: "Vuelo no disponible — Buelazo" }, { name: "robots", content: "noindex" }],
       };
     }
     const tramo = tramoVigente(f);
     return {
       meta: [
         {
-          title: `${tramo.origin.city} → ${tramo.destination.city} · ${S(f.resalePrice)} — Traspaso`,
+          title: `${tramo.origin.city} → ${tramo.destination.city} · ${S(f.resalePrice)} — Buelazo`,
         },
         {
           name: "description",
@@ -119,15 +121,16 @@ function FlightDetail() {
   const search = Route.useSearch();
   const { isSaved, toggleSaved } = useSaved();
   const { user } = useAuth();
+  const { openAuthModal } = useAuthModal();
   const { metodoPago: metodoPagoGuardado } = usePayment();
-  const navigate = useNavigate();
   const status = computeStatus(flight);
   const esPropiaOferta = !!user && user.id === flight.seller.id;
-  // dbStatus solo existe en vuelos reales de Supabase (mock no lo tiene) — si ya
-  // no está "active"/"last_call" (vendido, retirado), no se puede volver a comprar.
-  const noDisponibleParaComprar =
-    !!(flight as { dbStatus?: string }).dbStatus &&
-    !["active", "last_call"].includes((flight as { dbStatus?: string }).dbStatus!);
+  // dbStatus solo existe en vuelos reales de Supabase (mock no lo tiene).
+  const dbStatus = (flight as { dbStatus?: string }).dbStatus;
+  // Si ya no está "active"/"last_call" (vendido, retirado, rechazado), no se puede
+  // volver a comprar — pero el motivo por el que no está disponible varía (ver el
+  // badge de "Protección Escrow" más abajo, que distingue vendido de retirado/rechazado).
+  const noDisponibleParaComprar = !!dbStatus && !["active", "last_call"].includes(dbStatus);
   const [step, setStep] = useState(0);
   const [payOpen, setPayOpen] = useState(false);
 
@@ -139,15 +142,19 @@ function FlightDetail() {
     enabled: !!user && !!(flight as { dbStatus?: string }).dbStatus,
   });
 
-  // Si vuelve de iniciar sesión y este era el vuelo que quería pagar, retoma la
-  // compra automáticamente en vez de hacerlo buscar el botón de nuevo.
+  // El login ahora es un modal que abre en el lugar (no navega a /login), así
+  // que la intención de "quería comprar" solo necesita sobrevivir en memoria
+  // mientras el modal está abierto — apenas `user` pasa a existir, se retoma
+  // la compra sola en vez de hacer buscar el botón de nuevo. `useSaved()` ya
+  // resuelve el mismo patrón para el corazón de guardar por su cuenta.
+  const pendingBuyRef = useRef(false);
   useEffect(() => {
     if (!user || esPropiaOferta) return;
-    if (localStorage.getItem(PENDING_PURCHASE_KEY) === flight.id) {
-      localStorage.removeItem(PENDING_PURCHASE_KEY);
+    if (pendingBuyRef.current) {
+      pendingBuyRef.current = false;
       setPayOpen(true);
     }
-  }, [user, esPropiaOferta, flight.id]);
+  }, [user, esPropiaOferta]);
 
   // Cuenta como vista real solo si no es el propio vendedor viendo su publicación.
   useEffect(() => {
@@ -172,10 +179,19 @@ function FlightDetail() {
     );
   }
 
+  // Si ya se vendió (o se retiró/rechazó) y quien mira no es ni el comprador
+  // ni el vendedor, no tiene sentido dejarle ver ruta, precio ni datos del
+  // vendedor de una oferta que ya no puede tomar — solo comprador y vendedor
+  // siguen viendo el detalle completo.
+  const esParticipante = esPropiaOferta || !!misTransaccion;
+  if (noDisponibleParaComprar && !esParticipante) {
+    return <SoldNotice route={`${tramo.origin.code} → ${tramo.destination.code}`} />;
+  }
+
   const isWarn = status === "last_call";
   const saved = isSaved(flight.id);
   const shareUrl = typeof window !== "undefined" ? window.location.href : "";
-  const shareTexto = `Mira este pasaje ${tramo.origin.code} → ${tramo.destination.code} en Traspaso`;
+  const shareTexto = `Mira este pasaje ${tramo.origin.code} → ${tramo.destination.code} en Buelazo`;
 
   function copiarLink() {
     navigator.clipboard.writeText(shareUrl);
@@ -192,6 +208,21 @@ function FlightDetail() {
             className="text-sm font-bold text-[var(--color-primary-token)] hover:underline inline-flex items-center gap-1"
           >
             ← Volver a mis operaciones
+          </Link>
+        ) : search.from === "guardados" ? (
+          <Link
+            to="/profile"
+            search={{ tab: "guardados" }}
+            className="text-sm font-bold text-[var(--color-primary-token)] hover:underline inline-flex items-center gap-1"
+          >
+            ← Volver a guardados
+          </Link>
+        ) : search.from === "agente" ? (
+          <Link
+            to="/explore"
+            className="text-sm font-bold text-[var(--color-primary-token)] hover:underline inline-flex items-center gap-1"
+          >
+            ← Volver al chat
           </Link>
         ) : (
           <Link
@@ -219,7 +250,7 @@ function FlightDetail() {
                 <button
                   type="button"
                   onClick={copiarLink}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-ink)] px-2.5 py-1.5 text-xs font-bold text-white transition-transform hover:scale-105"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-ink)] px-2.5 py-1.5 text-xs font-bold text-white transition-transform hover:scale-105 active:scale-95"
                 >
                   <Copy className="h-3.5 w-3.5" /> Copiar
                 </button>
@@ -230,7 +261,7 @@ function FlightDetail() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Compartir por WhatsApp"
-                  className="grid h-11 w-11 place-items-center rounded-full bg-[#25D366] text-white transition-transform hover:scale-105"
+                  className="grid h-11 w-11 place-items-center rounded-full bg-[#25D366] text-white transition-transform hover:scale-105 active:scale-95"
                 >
                   <WhatsAppIcon className="h-5 w-5" />
                 </a>
@@ -239,7 +270,7 @@ function FlightDetail() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Compartir en Facebook"
-                  className="grid h-11 w-11 place-items-center rounded-full bg-[#1877F2] text-white transition-transform hover:scale-105"
+                  className="grid h-11 w-11 place-items-center rounded-full bg-[#1877F2] text-white transition-transform hover:scale-105 active:scale-95"
                 >
                   <Facebook className="h-5 w-5" />
                 </a>
@@ -252,7 +283,7 @@ function FlightDetail() {
                     });
                   }}
                   aria-label="Compartir en Instagram"
-                  className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#feda75] via-[#d62976] to-[#4f5bd5] text-white transition-transform hover:scale-105"
+                  className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-[#feda75] via-[#d62976] to-[#4f5bd5] text-white transition-transform hover:scale-105 active:scale-95"
                 >
                   <Instagram className="h-5 w-5" />
                 </button>
@@ -477,7 +508,9 @@ function FlightDetail() {
           <div className="rounded-[2rem] border border-border bg-white p-6 md:p-8 shadow-sm">
             <div className="flex items-center gap-5">
               <Avatar className="h-16 w-16 border border-border shadow-sm">
-                <AvatarImage src={flight.seller.avatarUrl} alt={flight.seller.name} />
+                {flight.seller.avatarUrl && (
+                  <AvatarImage src={flight.seller.avatarUrl} alt={flight.seller.name} />
+                )}
                 <AvatarFallback className="font-display text-2xl font-bold text-[var(--color-ink)]">
                   {flight.seller.avatar}
                 </AvatarFallback>
@@ -494,8 +527,7 @@ function FlightDetail() {
                   )}
                 </div>
                 <div className="text-sm font-medium text-muted-foreground mt-0.5">
-                  ★ {flight.seller.rating.toFixed(2)} · {flight.seller.reviews} traspasos · miembro
-                  desde {flight.seller.memberSince}
+                  miembro desde {flight.seller.memberSince}
                 </div>
               </div>
             </div>
@@ -541,7 +573,7 @@ function FlightDetail() {
 
             <div className="space-y-3 text-sm">
               <Row label="Precio del pasaje" value={S(flight.resalePrice)} />
-              <Row label="Servicio Traspaso (5%)" value={S(comision)} />
+              <Row label="Servicio Buelazo (5%)" value={S(comision)} />
               <Row label="Asiento" value={asientoLabel(asiento)} muted />
               <Row label="Verificación aerolínea" value="Incluido" muted />
             </div>
@@ -552,8 +584,8 @@ function FlightDetail() {
                   onClick={() => {
                     if (step === 0) {
                       if (!user) {
-                        localStorage.setItem(PENDING_PURCHASE_KEY, flight.id);
-                        navigate({ to: "/login" });
+                        pendingBuyRef.current = true;
+                        openAuthModal("login");
                         return;
                       }
                       setPayOpen(true);
@@ -569,7 +601,7 @@ function FlightDetail() {
                           : "Pago liberado",
                     );
                   }}
-                  className={`mt-6 flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-bold shadow-sm transition-transform hover:scale-[1.02] ${
+                  className={`mt-6 flex w-full items-center justify-center gap-2 rounded-full px-6 py-4 text-sm font-bold shadow-sm transition-transform ease-snappy hover:scale-[1.02] active:scale-[0.98] ${
                     isWarn
                       ? "bg-[var(--color-ink)] text-white hover:bg-black"
                       : "bg-[var(--color-primary-token)] text-white hover:bg-[var(--color-primary-token)]/90"
@@ -577,8 +609,8 @@ function FlightDetail() {
                 >
                   {step === 0
                     ? user
-                      ? "Pagar y retener dinero"
-                      : "Ingresar para pagar"
+                      ? "Comprar vuelo"
+                      : "Ingresa para comprar"
                     : step === 1
                       ? "Confirmar endoso iniciado"
                       : step === 2
@@ -663,7 +695,7 @@ function FlightDetail() {
                     <Link
                       to="/dashboard"
                       search={nuevaTransaccionId ? { tx: nuevaTransaccionId } : undefined}
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02]"
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white shadow-sm transition-transform ease-snappy hover:scale-[1.02] active:scale-[0.98]"
                     >
                       Comenzar trámite <ArrowRight className="h-4 w-4" />
                     </Link>
@@ -778,12 +810,12 @@ function FlightDetail() {
                         );
                       }
                     }}
-                    className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3.5 text-sm font-bold text-white shadow-sm transition-transform hover:scale-[1.02] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+                    className="flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3.5 text-sm font-bold text-white shadow-sm transition-transform ease-snappy hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100 disabled:active:scale-100"
                   >
                     <Lock className="h-4 w-4" /> Confirmar pago
                   </button>
                   <p className="text-center text-xs font-medium text-muted-foreground">
-                    Tu pago queda retenido en garantía — no se libera al vendedor hasta confirmar el
+                    Tu pago queda retenido en garantía. No se libera al vendedor hasta confirmar el
                     endoso.
                   </p>
                 </>
@@ -791,15 +823,18 @@ function FlightDetail() {
             </DialogContent>
           </Dialog>
 
-          {/* How escrow works (moved below checkout for mobile flow) */}
-          {misTransaccion ? (
+          {/* How escrow works (moved below checkout for mobile flow) — nunca
+              para el propio vendedor: RLS le permite ver la transacción real
+              (es participante), pero el progreso del comprador no le sirve
+              acá, ya tiene su propia vista en "Mis operaciones". */}
+          {esPropiaOferta ? null : misTransaccion ? (
             <div className="mt-6 rounded-[2rem] border border-border bg-white p-6 shadow-sm">
               <div className="mb-5 text-xs font-bold uppercase tracking-widest text-[var(--color-ink)]">
                 Protección Escrow
               </div>
               {misTransaccion.state === "reembolsado" ? (
                 <p className="text-sm text-muted-foreground">
-                  Esta transacción fue reembolsada — el pago no llegó a liberarse al vendedor.
+                  Esta transacción fue reembolsada. El pago no llegó a liberarse al vendedor.
                 </p>
               ) : (
                 <ol className="space-y-5 text-sm">
@@ -819,7 +854,7 @@ function FlightDetail() {
                         <TimelineStep
                           done={idx >= 0}
                           title="1. Pago confirmado"
-                          desc="Traspaso guarda tu dinero seguro."
+                          desc="Buelazo guarda tu dinero seguro."
                         />
                         <TimelineStep
                           done={idx >= 1}
@@ -849,10 +884,21 @@ function FlightDetail() {
             </div>
           ) : noDisponibleParaComprar ? (
             <div className="mt-6 flex items-center gap-2 rounded-[2rem] border border-border bg-white p-6 shadow-sm">
-              <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--color-secondary-token)]" />
-              <span className="text-sm font-bold text-[var(--color-ink)]">
-                Este pasaje ya fue vendido
-              </span>
+              {dbStatus === "rechazado" || dbStatus === "cancelled" ? (
+                <>
+                  <XCircle className="h-5 w-5 shrink-0 text-gray-400" />
+                  <span className="text-sm font-bold text-[var(--color-ink)]">
+                    Esta publicación ya no está disponible
+                  </span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--color-secondary-token)]" />
+                  <span className="text-sm font-bold text-[var(--color-ink)]">
+                    Este pasaje ya fue vendido
+                  </span>
+                </>
+              )}
             </div>
           ) : (
             <div className="mt-6 rounded-[2rem] border border-border bg-white p-6 shadow-sm">
@@ -860,7 +906,7 @@ function FlightDetail() {
                 Protección Escrow
               </div>
               <ol className="space-y-5 text-sm">
-                <TimelineStep title="1. Pago confirmado" desc="Traspaso guarda tu dinero seguro." />
+                <TimelineStep title="1. Pago confirmado" desc="Buelazo guarda tu dinero seguro." />
                 <TimelineStep
                   title="2. Trámite iniciado"
                   desc="Vendedor solicita cambio de titular."
@@ -929,6 +975,43 @@ function TimelineStep({ done, title, desc }: { done?: boolean; title: string; de
   );
 }
 
+function SoldNotice({ route }: { route: string }) {
+  return (
+    <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 md:py-24">
+      <div className="rounded-[2rem] border border-border bg-white p-8 text-center md:p-12 shadow-sm">
+        <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-gray-100 text-gray-400">
+          <CheckCircle2 className="h-8 w-8" />
+        </div>
+        <h1 className="mt-6 font-display text-4xl font-extrabold text-[var(--color-ink)]">
+          Este pasaje ya fue vendido
+        </h1>
+        <p className="mt-3 text-sm font-medium text-muted-foreground leading-relaxed">
+          Otra persona ya lo compró — el detalle completo solo queda visible para el comprador y el
+          vendedor.
+        </p>
+        <div className="mt-8 flex flex-wrap justify-center gap-3">
+          <button
+            onClick={() =>
+              toast.success("Alerta creada", {
+                description: `Te avisaremos si aparece otro vuelo ${route}.`,
+              })
+            }
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 shadow-sm"
+          >
+            <Bell className="h-4 w-4" /> Alertas para esta ruta
+          </button>
+          <Link
+            to="/explore"
+            className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-6 py-3 text-sm font-bold text-gray-600 hover:bg-gray-200 transition-colors"
+          >
+            Ver otros vuelos
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ExpiredNotice({ route }: { id: string; route: string }) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6 md:py-24">
@@ -941,7 +1024,7 @@ function ExpiredNotice({ route }: { id: string; route: string }) {
         </h1>
         <p className="mt-3 text-sm font-medium text-muted-foreground leading-relaxed">
           Este pasaje ya no cumple los tiempos mínimos para completar el trámite de endoso de forma
-          segura. Traspaso nunca vende inventario que no puedas usar.
+          segura. Buelazo nunca vende inventario que no puedas usar.
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <button
@@ -950,7 +1033,7 @@ function ExpiredNotice({ route }: { id: string; route: string }) {
                 description: `Te avisaremos si aparece otro vuelo ${route}.`,
               })
             }
-            className="inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 shadow-sm"
+            className="inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 shadow-sm"
           >
             <Bell className="h-4 w-4" /> Alertas para esta ruta
           </button>

@@ -5,19 +5,38 @@ import { ASIENTO_ALEATORIO_MENSAJE, ASIENTO_CATEGORIA_LABEL } from "@/lib/flight
 export function Field({
   label,
   required,
+  warning,
+  fieldRef,
   children,
 }: {
   label: string;
   required?: boolean;
+  // Marca el input en amarillo cuando, al intentar continuar, este campo
+  // resultó faltante — sin texto adicional, solo la interacción visual.
+  warning?: boolean;
+  // Referencia al `<label>` completo, usada solo para hacer scroll hasta acá
+  // cuando este es el primer campo faltante del Paso 0 — no afecta el layout.
+  fieldRef?: (el: HTMLLabelElement | null) => void;
   children: ReactNode;
 }) {
   return (
-    <label className="flex flex-col gap-2">
+    <label ref={fieldRef} className="flex flex-col gap-2">
       <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--color-ink)]">
         {label}
         {required && <span className="ml-0.5 text-[var(--color-primary-token)]">*</span>}
       </span>
-      {children}
+      <div
+        className={
+          warning
+            ? // El ring va directo sobre cada input/select (no sobre el wrapper
+              // completo) — así no se estira para cubrir también el texto de
+              // ayuda u otros elementos que compartan el mismo Field.
+              "[&_input]:rounded-xl [&_input]:border-transparent [&_input]:ring-2 [&_input]:ring-[var(--color-warning-token)] [&_select]:rounded-xl [&_select]:border-transparent [&_select]:ring-2 [&_select]:ring-[var(--color-warning-token)]"
+            : ""
+        }
+      >
+        {children}
+      </div>
     </label>
   );
 }
@@ -61,7 +80,7 @@ export function ReceiptRow({
         <div className="font-medium text-gray-600">{label}</div>
         {note && (
           <div
-            className={`mt-0.5 text-xs font-medium leading-relaxed ${warn ? "text-[var(--color-warning-token)]" : "text-muted-foreground"}`}
+            className={`mt-0.5 text-xs font-medium leading-relaxed ${warn ? "text-warning-ink" : "text-muted-foreground"}`}
           >
             {note}
           </div>
@@ -123,7 +142,7 @@ export function AsientoFields({
           </Field>
           <Field label="Número de asiento (opcional)">
             <input
-              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
+              className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base sm:text-sm font-medium focus:border-[var(--color-primary-token)] focus:ring-[var(--color-primary-token)]"
               placeholder="12A"
               value={numero}
               onChange={(e) => onNumeroChange(e.target.value)}
