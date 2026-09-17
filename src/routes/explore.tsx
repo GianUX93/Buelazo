@@ -109,7 +109,7 @@ const searchSchema = z.object({
 });
 
 export const Route = createFileRoute("/explore")({
-  validateSearch: (s) => searchSchema.parse(s),
+  validateSearch: (s) => searchSchema.catch({}).parse(s),
   head: () => ({
     meta: [
       { title: "Explorar vuelos disponibles — Buelazo" },

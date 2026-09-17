@@ -105,6 +105,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
   errorComponent: ErrorComponent,
 });
 
+const HOME_DIRECTION_CONTRACT = `
+THESIS: El home dejó de vender vuelos con tarjetas flotantes de gradiente — ahora ES el panel de información de un aeropuerto, reconocible al instante.
+OWN-WORLD: Paneles backlit oscuros (--color-ink) con vidrio de instrumento; Sora en mayúsculas para letreros, IBM Plex Mono tabular para rutas/horas/precios; coral (--color-primary-token) como flecha direccional, teal (--color-secondary-token) como sello verificado, morado (--color-accent-token) como voz de lucIA, amarillo (--color-warning-token) reservado a la cuña diagonal de urgencia.
+STORY: El visitante entiende que esto verifica y transfiere boletos reales, cree que puede hablarle a lucIA en vez de llenar filtros, y actúa escribiendo su búsqueda o mirando el tablero en vivo hacia "Explorar".
+FIRST VIEWPORT: Panel oscuro a sangre completa — letrero-titular con flecha, buscador de lucIA como línea de consulta del tablero, filas split-flap con vuelos reales, CTA secundario "Vender mi pasaje" como señal menor.
+FORM: Señalética Aeroportuaria, dirección asignada 1/7 de la lista propia; seed key fa4cb234.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
+`;
+
 function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="es-PE">
@@ -112,6 +121,11 @@ function RootShell({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
+        {/* eslint-disable-next-line react/no-danger -- comentario HTML real
+            (no un comentario JSX, que el compilador elimina), requerido para
+            que el contrato de dirección del rediseño del home sobreviva al
+            build de producción y sea auditable con grep. Puramente inerte. */}
+        <div dangerouslySetInnerHTML={{ __html: `<!--${HOME_DIRECTION_CONTRACT}-->` }} />
         {children}
         <Scripts />
       </body>

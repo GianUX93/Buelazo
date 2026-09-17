@@ -1,0 +1,12 @@
+app:
+  applicationId: e41aff58-d918-4df1-b244-e8c8d0eb23b8
+  env: ${APP_ENV:Development}
+  host: ${APP_HOST:http://localhost:8082}
+
+hawk:
+  spider:
+    ajax: true
+
+tags:
+  - name: _STACKHAWK_AGENT
+    value: ${HAWK_AGENT:none}

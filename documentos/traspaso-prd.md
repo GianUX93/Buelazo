@@ -1,7 +1,7 @@
 # Buelazo — PRD (Product Requirements Document)
 
 **Estado:** Prototipo funcional con **backend real en Supabase** (Postgres + Auth + Storage + Realtime) y **agente conversacional real en n8n** (webhook + AI Agent + memoria + tool de Supabase)
-**Última actualización:** septiembre 2026
+**Última actualización:** 12 de septiembre de 2026
 **Propósito de este documento:** que cualquier persona o agente de IA (Claude Code, Antigravity, etc.) pueda retomar el proyecto sin perder contexto, aunque haya pasado tiempo sin tocarlo.
 **Nota de marca:** el producto se llamó "Traspaso"; el nombre comercial real es **Buelazo** (logo, título de página, textos de marca). La palabra minúscula "traspaso" sigue usándose como sustantivo genérico de la acción de endosar un pasaje — no confundir ambos usos.
 
@@ -51,12 +51,13 @@ Proyecto con doble propósito: negocio real a validar, y pieza de portafolio de 
 | Servicios Supabase — vuelos/alertas de ruta guardados | `src/lib/services/route-alerts.ts` |
 | Servicios Supabase — favoritos | `src/lib/services/saved-flights.ts` |
 | Servicios Supabase — métodos de pago/cobro guardados | `src/lib/services/payment-methods.ts` |
-| Servicios Supabase — edición de perfil (teléfono, etc.) | `src/lib/services/profile.ts` |
+| Servicios Supabase — edición de perfil (teléfono, tipo/número de documento) | `src/lib/services/profile.ts` |
 | Servicio de CSAT / feedback de features (tabla `feature_feedback`) | `src/lib/services/feedback.ts` |
 | Login / registro (ruta directa, reutiliza `AuthForm`) | `src/routes/login.tsx` |
-| Formulario compartido de login/signup | `src/components/site/auth/AuthForm.tsx` |
+| Formulario compartido de login/signup (incluye documento de identidad + checkboxes) | `src/components/site/auth/AuthForm.tsx` |
 | Modal de login/signup montado en la raíz | `src/components/site/auth/AuthModal.tsx` |
 | Placeholder "Necesitas iniciar sesión" para rutas protegidas | `src/components/site/auth/AuthRequiredPlaceholder.tsx` |
+| Modal que completa el documento de identidad de cuentas creadas con Google | `src/components/site/auth/CompleteDocumentModal.tsx` |
 | Explorar vuelos (modo Manual + modo Agéntico) | `src/routes/explore.tsx` |
 | Panel del chat conversacional (modo Agéntico) | `src/components/site/agent-chat/ExploreAgentPanel.tsx` |
 | Burbujas de mensaje + indicador "pensando" | `src/components/site/agent-chat/ChatMessageBubble.tsx` |
@@ -135,13 +136,13 @@ Cada elemento de `flights[]` llega en un shape plano (no el `Flight` completo qu
   "original_price": 380,
   "resale_price": 191,
   "status": "active",
-  "seller": { "id": "uuid", "name": "...", "avatarUrl": "...", "rating": 5, "verifiedId": true }
+  "seller": { "id": "uuid", "name": "...", "avatarUrl": "...", "verifiedId": true }
 }
 ```
 
 `adaptFlight()` en `webhook-client.ts` mapea esto al `Flight` completo que espera `FlightCard`, resolviendo el código de aeropuerto a partir del nombre de ciudad (contra `airportsList`). **Nunca copia campos desconocidos tal cual** — solo lee, campo por campo, lo que el contrato documenta y lo que `FlightCard` efectivamente muestra (regla de negocio: el comprador nunca debe ver `airline_fee_estimate` ni otro campo interno, aunque se filtrara por error desde n8n).
 
-Si `id`/`seller` no vienen (contrato incompleto), se usa un `id` sintético estable (para la key de React) y un vendedor placeholder ("Vendedor verificado", sin foto ni rating) — nunca se inventa una reputación falsa. El link de detalle de una card con `id` sintético no resuelve hasta que n8n incluya el `id` real (ya corregido del lado de n8n en esta etapa).
+Si `id`/`seller` no vienen (contrato incompleto), se usa un `id` sintético estable (para la key de React) y un vendedor placeholder ("Vendedor verificado", sin foto) — nunca se inventa una reputación falsa. El link de detalle de una card con `id` sintético no resuelve hasta que n8n incluya el `id` real (ya corregido del lado de n8n en esta etapa). Nótese que el `Seller` del resto de la app **ya no tiene campo de `rating`/`reviews`** en absoluto (ver sección 10.14) — no es que este contrato lo omita, es que la reputación por estrellas se eliminó del modelo de datos por completo.
 
 ### 5.4 Reglas de negocio del chat
 
@@ -246,20 +247,44 @@ onChange={(e) => setX(e.target.value === "" ? 0 : Number(e.target.value))}
 
 **Regla general para el proyecto, hacia adelante:** cualquier animación que controle la **visibilidad** de contenido (no solo su entrada decorativa) debe preferir CSS declarativo sobre JS imperativo con callbacks — GSAP sigue siendo la herramienta correcta para parallax, scroll-reveals y transiciones puramente decorativas donde un fallo silencioso no rompe la funcionalidad.
 
-### 6.11 Otros ajustes de diseño notables
+### 6.11 Bug de notificación que no abre la card correcta (carrera con `ready`)
+
+**Contexto:** al hacer clic en una notificación (`?tx=...` o `?flight=...`), `dashboard.tsx` corrige el tab/sub-vista y hace `document.getElementById` + `scrollIntoView` + expande la card correspondiente vía `useEffect`.
+
+**Causa raíz:** `AuthProvider.getSession().then(...)` marca `user` como disponible (lo que activa las queries de transacciones/vuelos, con `enabled: !!user`) **antes** de que `fetchProfile()` termine y recién ahí ponga `isLoading = false`. `ready` (lo que decide si `dashboard.tsx` muestra las cards reales o `AuthRequiredPlaceholder`) depende de `isLoading`, no de `user`. Si la query de transacciones/vuelos responde **antes** que la del perfil, el `useEffect` que busca la card en el DOM corre mientras la página todavía muestra el placeholder — no encuentra nada, y como `ready` no estaba en su arreglo de dependencias, nunca vuelve a intentarlo cuando el placeholder por fin se reemplaza por las cards reales.
+
+**Fix:** agregar `ready` a las dependencias de ambos `useEffect` (el de `tx` y el de `flight`) para que reintenten apenas la página termina de cargar el perfil, sin importar qué query ganó la carrera.
+
+### 6.12 Bug del aviso "Ya enviaste tus datos" pegado en pantalla
+
+**Causa raíz:** el aviso solo dependía de `puedeGestionar` (`true` durante *todo* el trámite, desde `pago_retenido` hasta justo antes de `liberado`) y de que el comprador ya hubiera enviado sus datos de endoso — nunca se apagaba al avanzar de estado, así que seguía visible incluso en "Traspaso confirmado".
+
+**Fix:** se agregó `t.state === "pago_retenido"` a la condición, para que solo aparezca mientras el trámite sigue en el paso "Pago confirmado" (el único momento en que ese aviso aporta algo).
+
+### 6.13 Bug del modal de login reabriéndose tras cerrar sesión en una ruta protegida
+
+**Contexto:** cerrar sesión estando en `/dashboard` (o cualquier ruta con `useRequireAuth()`) debe redirigir a home, no dejar ver el modal de login abriéndose solo sobre la página ni el `AuthRequiredPlaceholder` detrás.
+
+**Causa raíz:** un primer intento cerró el modal (`closeAuthModal()`) justo antes de navegar a home — pero el propio `useRequireAuth()` de la página protegida reacciona al mismo cambio de `user → null` y **reabre el modal** un instante después, ganando la carrera contra el `navigate()`. Como el estado del modal es global (por encima del router), sobrevivía al cambio de página.
+
+**Fix (en la raíz, no con otro cierre encima):** `AuthContext` expone `isSigningOut`, `true` desde que se llama `signOut()` hasta ~300ms después de que resuelve (a propósito no en el mismo tick en que `user` pasa a `null`, para que `useRequireAuth()` alcance a verlo). `useRequireAuth()` ahora solo abre el modal si `!isLoading && !user && !isSigningOut` — durante un logout intencional, nunca lo intenta. `SiteHeader.tsx` complementa esto con `esRutaProtegida(pathname)`: si el logout ocurre en `/dashboard`, `/profile`, `/admin/revisiones` o `/edit-flight/:id`, navega a `/` (no aplica a `/publish`, que maneja la pérdida de sesión con su propia lógica por paso — ver 9.1).
+
+### 6.14 Otros ajustes de diseño notables
 
 - **Chevron de `<select>` nativos:** reemplazado por `appearance-none` + ícono `ChevronDown` de lucide posicionado manualmente.
 - **Stepper de "Publicar pasaje" clickeable:** tanto el número como el label son clickeables, pero solo hasta el paso máximo ya visitado (`maxStepReached`).
 - **Confeti sutil en "¡Pago liberado!":** animación ligera con GSAP sobre divs absolutos dentro del modal de éxito.
 - **`FlightCard` — header simplificado:** se quitó el nombre de la aerolínea y el número de vuelo del encabezado de la card, dejando solo el logo, para que el badge de asiento y el corazón de guardar nunca compitan por espacio.
 - **Campos con estado "warning" (`Field` en `PublishFormFields.tsx`):** el botón "Continuar" del Paso 1 de Publicar **nunca se deshabilita** — en vez de bloquear, al intentar avanzar sin completar todo, los campos faltantes se marcan con un ring amarillo (`--color-warning-token`) aplicado directamente sobre el `input`/`select` interno (no sobre todo el wrapper del campo, para no estirarse también sobre texto de ayuda u otros elementos que compartan el mismo `Field`).
+- **Autoscroll al primer campo faltante del Paso 0:** además de pintarse en amarillo, "Continuar" hace `window.scrollTo` hasta el primer campo que falta (mismo orden de prioridad que el mensaje de error). `Field` acepta un prop `fieldRef` que expone el `<label>` raíz; `publish.tsx` mantiene un mapa de refs (`fieldRefs`, uno por cada campo validable de `CAMPOS_PASO0_ORDEN`, incluido el dropzone del comprobante, que no usa `Field`) y calcula `primerCampoFaltanteKey` con el mismo criterio que `primerCampoFaltantePaso0()`. El offset de scroll reutiliza `SITE_HEADER_HEIGHT` (56px, ahora una constante de módulo) para no dejar el campo tapado bajo el header sticky.
 
 ## 7. Módulos funcionales — estado real
 
 | Módulo | Descripción | Estado |
 |---|---|---|
 | **Autenticación real vía modal** | Login/signup en un modal (`AuthModal`) que se abre sobre la página actual, sin navegar ni recargar — ver sección 8 | **Implementado** |
-| **Registro simplificado (3 campos)** | Nombre completo (un solo input, se parte en nombres/apellido al guardar), correo, contraseña + Google — ver sección 8.2 | **Implementado** |
+| **Registro simplificado** | Nombre completo, tipo + número de documento, correo, contraseña + Google, checkboxes de términos (obligatorio) y marketing (opcional) — ver sección 8.2 | **Implementado** |
+| **Verificación de identidad (documento declarado)** | `profiles.document_type`/`document_number`; para cuentas de Google (que no pasan por el registro), se completa con `CompleteDocumentModal` antes de publicar — ver sección 8.4 | **Implementado** |
 | **Agente conversacional (lucIA)** | Modo alternativo de búsqueda en `/explore`, sobre webhook real de n8n — ver sección 5 | **Implementado** |
 | Búsqueda manual → presets de rango | Presets (`semana`, `quince`, `mes`, `fecha`) + filtrado en vivo + selector de tipo de vuelo integrado a la barra (ya no chips en fila aparte) | **Implementado** |
 | Reglas de vigencia (`active`/`last_call`/`expired`) | Ver sección 9.1 | **Implementado** |
@@ -307,9 +332,14 @@ Antes, "Ingresar" navegaba a `/login`, y cualquier acción que requería sesión
 - **Copy contextual opcional:** `openAuthModal(mode, { title, text })` reemplaza el título/subtítulo genérico de `AuthForm` (nunca agrega una caja/banner aparte encima del formulario — se probó y se descartó por verse mal) — se mantiene igual sin importar si el usuario alterna entre login y signup dentro del modal.
 - **`useRequireAuth()`** (usado por `/dashboard`, `/profile`, `/admin/revisiones`, `/edit-flight/$id` — **no por `/publish`**, ver sección 9) ahora abre el modal en el lugar en vez de `navigate({ to: "/login" })`. Si el usuario cierra el modal sin loguearse, la página muestra `AuthRequiredPlaceholder` (candado + botón "Iniciar sesión" + "Volver al inicio") en vez de quedar en blanco.
 
-### 8.2 Registro simplificado — 3 campos, y la regla de nunca mezclar cuenta con pasajero
+### 8.2 Registro simplificado, documento de identidad y consentimientos
 
-El signup pasó de 6 campos (Nombres, Apellido paterno, Apellido materno, Teléfono, Correo, Contraseña) a 3: **Nombre completo**, **Correo**, **Contraseña** (+ Google). Al guardar, el nombre completo se parte en la primera palabra (`first_name`) y el resto (`last_name`) para no perder el dato en el trigger que llena `profiles`.
+El signup pasó de 6 campos (Nombres, Apellido paterno, Apellido materno, Teléfono, Correo, Contraseña) a: **Nombre completo**, **Tipo de documento** (DNI/Pasaporte/Carné de Extranjería) + **Documento de identidad**, **Correo**, **Contraseña** (+ Google), más dos checkboxes al final del formulario:
+
+- **Términos y condiciones** — obligatorio, deshabilita "Crear cuenta" hasta marcarse (enlaza a `/trust` como sustituto temporal, hasta que exista una página legal dedicada).
+- **Recibir información comercial** — opcional, se guarda como `marketing_opt_in`.
+
+Al guardar, el nombre completo se parte en la primera palabra (`first_name`) y el resto (`last_name`); tipo/número de documento y `marketing_opt_in` se pasan como metadata de `signUp()` y el trigger `handle_new_user()` los escribe directo en `profiles.document_type`/`profiles.document_number` (ver 8.4 para el caso de Google). Los campos de documento reutilizan `TipoDocumento`, `DOCUMENTO_MAX_LEN` y `sanitizeNumeroDocumento` ya existentes en `flight-utils.ts`/`mock-data.ts` — el label es "N.° de documento" (no "Documento de identidad") a propósito: con ese texto más largo, el label de la derecha saltaba de línea y desalineaba los dos inputs de la grilla de 2 columnas frente a "Tipo de documento".
 
 **Regla crítica, sin excepciones:** ningún dato de "Datos del pasajero" (nombres, apellidos, teléfono, documento) en el flujo de Publicar se autocompleta jamás desde el perfil de la cuenta logueada — el vendedor no siempre es el pasajero (puede estar publicando el boleto de un tercero). La única fuente válida es la extracción simulada del comprobante (ver 9.3); si esa extracción no trae un dato, el campo queda vacío para llenado manual. Se verificó explícitamente que `publish.tsx` no lee `profile` en ningún punto.
 
@@ -324,6 +354,16 @@ El signup pasó de 6 campos (Nombres, Apellido paterno, Apellido materno, Teléf
 | "Continuar" del Paso 1 de Publicar sin sesión | No existía el control (se podía publicar sin sesión hasta el final) | `openAuthModal("login", { title, text })` con copy contextual — ver sección 9 |
 
 Las constantes `PENDING_PURCHASE_KEY`/`PENDING_SAVE_KEY` (localStorage) quedaron retiradas — ya nada las escribe, todos los flujos de "retomar tras loguearse" ahora viven en memoria (`useEffect` reactivo a `user`), porque el modal ya no requiere abandonar la página.
+
+### 8.4 El hueco de Google — `CompleteDocumentModal`
+
+El registro por email/contraseña pide tipo/número de documento en el propio formulario (8.2), pero una cuenta creada con **Google OAuth** nunca pasa por ese formulario — `signInWithOAuth` no tiene forma de pedir campos custom. Antes de decidir cómo resolverlo se evaluaron señales de referencia (Rename Travel: pide el documento en el registro y las fotos del DNI desde `/profile`); la resolución adoptada:
+
+- **Documento de identidad (tipo + número):** se completa con `CompleteDocumentModal` (no dismisible: `[&>button]:hidden`, `onEscapeKeyDown` bloqueado), gateado en el **mismo punto** donde ya se pedía login en Publicar — al pasar del Paso 1 al Paso 2. `publish.tsx` chequea `user && !profile?.document_number`; si falta, abre el modal en vez de avanzar. Al enviar, llama `updateDocumentInfo(userId, tipo, numero)` (`src/lib/services/profile.ts`) y `refreshProfile()` antes de continuar solo al Paso 2.
+- **Fotos de ambos lados del DNI:** identificado como una mejora futura (subida desde `/profile`, a imagen de Rename Travel) — **no construida todavía**, solo discutida. No confundir con el punto anterior: hoy solo se captura el documento como dato de texto, no como imagen.
+- **Por qué no se resolvió en el propio `signUp()`:** Google es un redirect externo — no hay forma de interceptar el flujo para pedir un campo adicional antes de que la cuenta ya exista en Supabase Auth. Pedirlo justo antes de publicar (en vez de apenas inicia sesión por primera vez) sigue el mismo criterio que el gate de login: pedir el dato en el momento en que de verdad hace falta, no antes.
+
+**Migración de esquema asociada** (ejecutada manualmente en el SQL Editor de Supabase, sin acceso MCP del agente a la base de datos — ver sección 14): `ALTER TABLE profiles ADD COLUMN document_type text, ADD COLUMN document_number text;` y un `CREATE OR REPLACE FUNCTION handle_new_user()` actualizado para que el `insert into public.profiles (...)` también escriba `document_type`/`document_number` desde `nullif(meta->>'document_type', '')`/`nullif(meta->>'document_number', '')` — quedan `null` para cuentas de Google, que es exactamente la señal que `publish.tsx` usa para decidir si abrir `CompleteDocumentModal`.
 
 ## 9. Publicar pasaje — login diferido, borrador y precio sugerido
 
@@ -351,6 +391,8 @@ Cerrar el modal de login *sin* loguearse (Situación A del prompt original) no r
 
 `handleVoucherUpload` separa dos cosas que antes eran una sola: la **extracción simulada** (llenar aerolínea, vuelo, fechas, datos del pasajero) ya no depende de `user` — corre igual con o sin sesión. La **subida real a Supabase Storage** sí necesita un usuario real; si no hay sesión al momento de subir el archivo, se guarda en memoria (`voucherFileRef`) y se sube recién en `handlePublicar()`, donde la sesión ya está garantizada por el gate del Paso 1→2. La señal de "¿ya se subió un comprobante?" para la validación del paso y la UI del dropzone es `data.voucherName` (no `data.voucherUrl`, que puede seguir siendo `null` mientras no hay sesión).
 
+**Qué cuenta como comprobante válido — el comprobante sigue siendo obligatorio, sin excepción** (es el mismo archivo que el revisor usa para aprobar la publicación — quitar el requisito debilitaría el control anti-fraude justo donde más importa), pero el copy se ajustó para bajar la fricción percibida: el dropzone acepta `image/*,.pdf`, así que una foto o captura de pantalla del celular ya sirve — no hace falta un PDF formal de reserva. El texto bajo el label dice explícitamente "sirve una foto o captura del correo de confirmación de la aerolínea, o de la reserva vista en su web o app". Se descartaron a propósito dos formatos que en un primer borrador del copy sí se mencionaban: el **boarding pass** (se emite recién ~24h antes del vuelo, y para ese punto la aerolínea normalmente ya no permite el cambio de nombre — mencionarlo como comprobante válido es contradictorio con la necesidad real de margen para el endoso, ver 9.8) y una **captura de conversación** confirmando la reserva (no se percibe como evidencia seria).
+
 ### 9.4 Sugerencia de precio con datos reales
 
 `getSimilarActiveResalePrices(originCode, destinationCode, airline?)` en `flights.ts` consulta `resale_price` de otras publicaciones **activas** en la misma ruta (tabla `flights`, pública) — deliberadamente **no** usa la tabla `transactions` (el precio real de venta), porque su RLS solo permite ver transacciones en las que el usuario participó como comprador o vendedor; usar eso requeriría una función nueva en Supabase que agregue el promedio sin exponer filas individuales, evaluado y descartado por ahora a favor de este enfoque sin cambios de esquema.
@@ -377,6 +419,28 @@ En la pantalla "Enviado a revisión" (Paso 3), justo después de publicar — no
   neto_final = max(0, precio_venta - cargo_aerolinea_confirmado - comision_efectiva)
   ```
 - **El comprador nunca ve el monto del cargo de aerolínea**, en ningún momento del flujo — ni en el marketplace manual, ni en el chat de lucIA.
+
+### 9.7 Origen y destino no pueden ser el mismo aeropuerto
+
+Bug encontrado en producción: nada impedía elegir la misma ciudad en los dos `<select>` independientes de Origen/Destino del Paso 0. Fix en dos capas, mismo patrón que el resto de validaciones del formulario:
+
+1. **Paso 0:** `primerCampoFaltantePaso0()` rechaza con "El origen y el destino no pueden ser el mismo aeropuerto" si `data.from === data.to`, justo después de validar la tarifa y antes de la fecha (mismo orden visual del formulario) — resalta ambos campos en amarillo y el autoscroll (9.8) lleva ahí.
+2. **`handlePublicar()`:** red de seguridad — si por algún motivo se llega a ese punto con origen=destino, bloquea la publicación y regresa al Paso 0 con un toast.
+
+No afecta a `edit-flight.$id.tsx`: ese formulario no permite editar origen/destino (solo precio, fechas, aerolínea, asientos y cargo), así que no comparte este hueco.
+
+### 9.8 Margen mínimo para gestionar el endoso (`MIN_VIABLE_H`)
+
+Segundo bug/gap encontrado a partir de una observación sobre el boarding pass (ver 9.3): nada impedía publicar un vuelo cuya salida ya estuviera a punto de ocurrir, sin margen operativo real para completar el trámite de endoso. Se reutilizó `MIN_VIABLE_H` (3 horas — la misma constante que `computeStatus()` en `flight-utils.ts` ya usa para marcar una publicación **activa** como `expired`), aplicada ahora también **al momento de crear** la publicación, no solo mientras envejece:
+
+- Se calcula la fecha/hora real del **tramo vigente** — mismo criterio que `tramoVigente()`: si `tramoAVender === "regreso"` manda esa fecha, en cualquier otro caso (incluido "ambos") manda la de ida.
+- Si `hoursUntil(tramoVigente) < MIN_VIABLE_H` (o ya pasó), se bloquea con el mensaje "La salida del tramo que estás vendiendo es en menos de 3 horas (o ya pasó) — no queda margen real para tramitar el endoso con la aerolínea."
+- **Dos capas:** Paso 0 (mensaje + resalta en amarillo la fecha/hora del tramo correspondiente, reutilizando los mismos campos que ya se resaltaban por "vacío") y `handlePublicar()` (red de seguridad por si el margen se agotó mientras el vendedor llenaba Precio/Revisión — regresa al Paso 0 con un toast).
+- Deliberadamente **no** se tocó el mecanismo de `sellerAllowsLastCall`/ventana de 24h ("última llamada") — ese sigue siendo criterio del revisor al aprobar una publicación ya creada, un concepto distinto: acá se bloquea únicamente el piso duro de inviabilidad operativa (3h), no la ventana de 24h que la Ley N° 32325 vincula a la gratuidad del trámite.
+
+### 9.9 Autoscroll al primer campo faltante
+
+Ver 6.14 — al fallar la validación del Paso 0, "Continuar" ahora hace scroll directo al primer campo que falta (o al primero que viola 9.7/9.8), además de pintarlo en amarillo.
 
 ## 10. Reglas de negocio críticas (resto del producto, sin cambios en esta etapa)
 
@@ -419,6 +483,12 @@ Botón deshabilitado hasta que el número tenga exactamente la longitud esperada
 ### 10.13 Un vendedor no puede comprar su propia oferta — gate de UI, no de base de datos
 Pendiente confirmar si existe el `CHECK` de Postgres recomendado (`buyer_id <> seller_id`).
 
+### 10.14 Sin sistema de reputación por estrellas/reseñas — decisión de producto, no una omisión
+
+Se removió por completo `rating`/`reviews` del tipo `Seller` y de todos sus usos (`FlightCard.tsx`, `flight.$id.tsx`, `profile.tsx`, `mock-data.ts`, `flights.ts`, `webhook-client.ts`, `types.ts`) — incluyendo un bloque de "reputación" en `/profile` que además estaba **completamente desconectado**: mostraba un objeto mock hardcodeado ("Andrea Salazar") en vez de datos del usuario real logueado.
+
+**Razón:** la mayoría de vendedores usa la plataforma una sola vez (vendió un pasaje que no pudo usar) — un sistema de estrellas con n=0-1 reseñas es ruido, no señal, y puede *restar* confianza percibida en vez de sumarla. La única señal de confianza que se mantiene es el badge binario **`verifiedId`/`ShieldCheck`** (ya conectado a la columna real `profiles.is_verified`) — la confianza real del producto viene de mecanismos institucionales (revisión manual, escrow, confirmación del comprador antes de liberar el pago), no de reputación entre pares.
+
 ## 11. Limitaciones conocidas del prototipo (no resueltas a propósito)
 
 - **Sin pasarela de pago real.**
@@ -427,7 +497,7 @@ Pendiente confirmar si existe el `CHECK` de Postgres recomendado (`buyer_id <> s
 - **Revisión de publicaciones y de cargos de aerolínea es 100% manual.**
 - **Sin panel de soporte con mediación real de disputas.**
 - **Equipaje no es 100% por tramo.**
-- **Sin verificación de identidad real.**
+- **Verificación de identidad es solo un dato declarado, no verificado**: se captura tipo/número de documento en el registro (o vía `CompleteDocumentModal` para cuentas de Google, ver 8.4), pero no hay validación real contra RENIEC ni sube foto del documento todavía — eso queda como mejora futura para `/profile` (ver Roadmap).
 - **El modelo de comisión de la plataforma no varía aún según urgencia** — porcentajes por definir.
 
 ## 12. Roadmap sugerido
@@ -436,7 +506,7 @@ Pendiente confirmar si existe el `CHECK` de Postgres recomendado (`buyer_id <> s
 2. **Integración real de autocompletado por IA** (modelo de visión).
 3. **Automatizar (parcial o totalmente) la verificación de publicaciones y cargos de aerolínea.**
 4. **Panel de soporte con más opciones de resolución de disputas.**
-5. **Verificación de identidad real.**
+5. **Verificación de identidad real** — subir ambos lados del documento desde `/profile` (referencia: Rename Travel) y, eventualmente, validación real contra RENIEC en vez de solo el dato declarado (ver 8.4 y 11).
 6. **Equipaje por tramo.**
 7. **Definición del modelo de comisión con cifras reales.**
 8. **Función/vista en Supabase para sugerir precio con datos reales de `transactions`** (ventas reales, no solo publicaciones activas), sin exponer filas individuales — para reemplazar el fallback del 48% con algo mejor fundamentado.
@@ -451,6 +521,7 @@ Pendiente confirmar si existe el `CHECK` de Postgres recomendado (`buyer_id <> s
 - **Automatización de la verificación** (publicaciones y cargos de aerolínea): evaluada y descartada por ahora.
 - **Alcance de la resolución de disputas.**
 - **Homologar el color de foco de inputs en todo el sitio** (ver 6.8) — hoy solo se corrigió en los campos de precio.
+- **Página legal de términos y condiciones:** el checkbox de registro (8.2) enlaza temporalmente a `/trust` ("Cómo funciona") — falta una página legal dedicada con el texto real.
 
 ## 14. Contexto para un agente de IA que retome el proyecto
 
@@ -464,3 +535,5 @@ Pendiente confirmar si existe el `CHECK` de Postgres recomendado (`buyer_id <> s
 - Todas las reglas de negocio de la sección 10 son restricciones de diseño ya decididas, no sugerencias.
 - Las decisiones pendientes (sección 13) no deben resolverse arbitrariamente por un agente de código — le corresponden al fundador (Gianca).
 - Las limitaciones conocidas (sección 11) son intencionales para esta etapa del prototipo — no "arreglarlas" sin que el fundador lo pida explícitamente.
+- **`Seller` ya no tiene `rating`/`reviews`** (ver 10.14) — no reintroducir un campo de reputación por estrellas sin que se pida explícitamente; la única señal de confianza del modelo de datos es `verifiedId`.
+- **Cuidado con `useEffect`s que dependen de un gate asíncrono no listado en sus dependencias** (ver 6.11/6.13): si un efecto hace algo condicionado a que cierto estado ya esté "listo" (`ready`, `isLoading`, etc.) pero ese booleano no está en su arreglo de dependencias, el efecto puede correr *antes* de que el gate se cumpla y nunca reintentar cuando por fin se cumple — un patrón ya visto dos veces en este proyecto (notificaciones del dashboard, reapertura del modal de login tras logout). Al tocar un efecto que depende de datos que llegan de forma asíncrona en distinto orden entre sí, verificar que todas las condiciones relevantes estén en el arreglo de dependencias, no solo las obvias.

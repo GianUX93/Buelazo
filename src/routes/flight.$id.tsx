@@ -23,6 +23,7 @@ import {
   Facebook,
   Instagram,
   Eye,
+  HelpCircle,
 } from "lucide-react";
 
 import { useSaved } from "@/lib/saved-context";
@@ -49,15 +50,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
-
-function WhatsAppIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" />
-      <path d="M12.001 2C6.478 2 2 6.477 2 12c0 1.876.52 3.63 1.42 5.13L2 22l4.995-1.394A9.947 9.947 0 0 0 12 22c5.523 0 10-4.477 10-10S17.523 2 12.001 2zm0 18.06c-1.66 0-3.2-.492-4.495-1.339l-.322-.206-3.132.875.836-3.06-.209-.328A8.03 8.03 0 0 1 3.94 12c0-4.444 3.617-8.06 8.062-8.06 4.444 0 8.06 3.616 8.06 8.06 0 4.445-3.616 8.06-8.061 8.06z" />
-    </svg>
-  );
-}
+import { WhatsAppIcon } from "@/components/site/WhatsAppIcon";
+import { SOPORTE_WHATSAPP_URL } from "@/lib/support";
 
 type MetodoPago = "yape" | "tarjeta" | "transferencia";
 
@@ -648,11 +642,11 @@ function FlightDetail() {
                     <CheckCircle2 className="h-8 w-8" />
                   </div>
                   <h2 className="mt-4 font-display text-2xl font-extrabold text-[var(--color-ink)]">
-                    ¡Pago retenido con éxito!
+                    ¡Pago protegido con éxito!
                   </h2>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    Tu dinero está seguro en escrow. No se libera al vendedor hasta que confirmes
-                    que recibiste el traspaso.
+                    Guardamos tu dinero de forma segura. Solo se le entrega al vendedor cuando tú
+                    confirmes que recibiste el traspaso.
                   </p>
 
                   <div className="mt-6 space-y-2 rounded-2xl border border-border bg-surface-2 p-4 text-left text-sm">
@@ -901,22 +895,39 @@ function FlightDetail() {
               )}
             </div>
           ) : (
+            // Antes de comprar todavía no existe una transacción, así que el
+            // timeline de escrow (1-4) aparecía completo pero apagado — los
+            // usuarios lo leían como algo por hacer, no como información.
+            // Ese mismo timeline con datos reales ya vive en "Mis
+            // operaciones" una vez que sí hay una transacción en curso; acá
+            // se reemplaza por algo accionable para quien todavía duda.
             <div className="mt-6 rounded-[2rem] border border-border bg-white p-6 shadow-sm">
-              <div className="mb-5 text-xs font-bold uppercase tracking-widest text-[var(--color-ink)]">
-                Protección Escrow
+              <div className="mb-1 flex items-center gap-2 text-sm font-bold text-[var(--color-ink)]">
+                <ShieldCheck className="h-4 w-4 shrink-0 text-[var(--color-secondary-token)]" />
+                Tu pago queda protegido hasta confirmar el traspaso
               </div>
-              <ol className="space-y-5 text-sm">
-                <TimelineStep title="1. Pago confirmado" desc="Buelazo guarda tu dinero seguro." />
-                <TimelineStep
-                  title="2. Trámite iniciado"
-                  desc="Vendedor solicita cambio de titular."
-                />
-                <TimelineStep
-                  title="3. Verificación"
-                  desc="Validamos que el boleto está a tu nombre."
-                />
-                <TimelineStep title="4. Pago liberado" desc="El vendedor recibe su dinero." />
-              </ol>
+              <p className="text-xs font-medium text-muted-foreground">
+                Buelazo retiene el dinero en garantía y recién lo libera al vendedor cuando
+                confirmas que el boleto quedó a tu nombre.
+              </p>
+              <div className="mt-4 flex flex-col gap-2 border-t border-dashed border-border pt-4">
+                <Link
+                  to="/trust"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-4 py-2.5 text-xs font-bold text-[var(--color-ink)] transition-colors hover:bg-muted"
+                >
+                  <HelpCircle className="h-3.5 w-3.5" />
+                  Ver cómo funciona el proceso
+                </Link>
+                <a
+                  href={SOPORTE_WHATSAPP_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full bg-[#25D366] px-4 py-2.5 text-xs font-bold text-white transition-transform hover:scale-[1.02] active:scale-95"
+                >
+                  <WhatsAppIcon className="h-3.5 w-3.5" />
+                  Escribir a soporte por WhatsApp
+                </a>
+              </div>
             </div>
           )}
         </aside>

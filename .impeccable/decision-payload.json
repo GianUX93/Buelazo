@@ -1,0 +1,126 @@
+{
+  "title": "Elige el mundo visual del nuevo Home",
+  "question": "La tirada asignó Señalética Aeroportuaria. Mantenla, toma una alternativa, o vuelve a tirar.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Señalética Aeroportuaria",
+      "kicker": "THE ROLL",
+      "lineage": "Sistemas de wayfinding modernista (Otl Aicher/Lufthansa, ICAO, tableros split-flap, AIGA symbol signs)",
+      "thesis": "El home se convierte en el propio panel de información del aeropuerto: no vende vuelos, te orienta hacia ellos.",
+      "palette": ["#ea580c", "#0d1b2a", "#0f766e", "#f5f3ee"],
+      "materials": ["panel backlit / lightbox", "tipografía de señalética geométrica", "numerales tabular mono", "flechas direccionales", "grilla de tablero split-flap"],
+      "viewport": "Fondo oscuro tipo panel backlit a sangre completa; titular tratado como letrero de puerta de embarque con una flecha direccional; el buscador de lucIA vive como la línea de consulta del tablero, con filas de ejemplo (ruta → precio) que se revelan con una animación de flip tipo tablero de salidas; CTA secundario 'Vender mi pasaje' como panel de señal más pequeño al costado.",
+      "risk": "Puede sentirse institucional/frío si el grid domina sin ningún momento cálido o humano.",
+      "raised": [
+        { "from": "hand-drawn-zine-explainer", "raise": "lucIA se trata como una figura-pictograma iluminada que guía (no solo un ícono de chat), suavizando la frialdad del sistema." },
+        { "from": "signals-instruments-night-flight-six-pack", "raise": "Los estados en vivo (countdown de endoso, pasos de escrow) se leen como una lectura de instrumento preciso (aguja/dial), no una barra de progreso genérica." },
+        { "from": "kinetic-sculpture-automata-crank-paper-menagerie", "raise": "La transición del tablero al revelar precios/respuestas de lucIA es una animación mecánica de placa deslizante/flip, con peso táctil real, no un fade plano." },
+        { "from": "magnetism-electricity-plasma-hand-bent-neon-circuit", "raise": "Los paneles clave (buscador hero, CTAs) llevan un halo backlit sutil en el borde, como una caja de luz real de aeropuerto." },
+        { "from": "posters-covers-sleeves-saul-bass-title", "raise": "La sección 'Así funciona' (protección escrow) se rehace como secuencia de tarjetas a sangre completa de color plano, una idea por tarjeta, con siluetas gráficas." },
+        { "from": "design-canon-constructivist-agit-train", "raise": "La sección 'Última llamada' usa una cuña diagonal que empuja hacia adelante, distinta del grid calmado del resto, para comunicar urgencia real." }
+      ],
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          { "label": "nav", "x": 0, "y": 0, "w": 12, "h": 1 },
+          { "label": "letrero titular + flecha direccional", "x": 0, "y": 1, "w": 9, "h": 3, "accent": true },
+          { "label": "panel CTA vender (señal secundaria)", "x": 9, "y": 1, "w": 3, "h": 3 },
+          { "label": "buscador lucIA (línea de consulta del tablero)", "x": 1, "y": 4, "w": 10, "h": 2, "accent": true },
+          { "label": "filas split-flap (rutas ejemplo)", "x": 1, "y": 6, "w": 10, "h": 2 },
+          { "label": "franja de confianza (escrow/verificado)", "x": 0, "y": 8, "w": 12, "h": 2 }
+        ]
+      }
+    },
+    {
+      "id": "model-pick",
+      "label": "Boleto Vivo",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "Boarding pass / ticket stub ephemera — borde perforado, barcode, sellos de verificación",
+      "thesis": "Todo se renderiza como el propio objeto que se transa: un boleto físico apilado, sellado y transferido.",
+      "palette": ["#ea580c", "#1c1917", "#0f766e", "#faf7f2"],
+      "materials": ["papel carbón / copia calco", "borde perforado", "barcode", "sello 'VERIFICADO/ENDOSADO'"],
+      "viewport": "Una pila de boarding-passes en abanico; el ticket superior es interactivo, con el buscador de lucIA escrito directamente sobre él como si se tecleara en el boleto.",
+      "risk": "Es el material más literal del producto: fuerte identificación inmediata, pero con menos rango dramático en pantalla completa que un panel de aeropuerto.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          { "label": "nav", "x": 0, "y": 0, "w": 12, "h": 1 },
+          { "label": "pila de boletos en abanico", "x": 2, "y": 1, "w": 8, "h": 7, "accent": true },
+          { "label": "buscador lucIA sobre el boleto superior", "x": 3, "y": 3, "w": 6, "h": 2, "accent": true },
+          { "label": "CTA vender", "x": 9, "y": 1, "w": 3, "h": 1 }
+        ]
+      }
+    },
+    {
+      "id": "challenger-night-flight-six-pack",
+      "label": "Panel de Instrumentos Nocturno",
+      "verdict": "competitive",
+      "lineage": "Six-pack de instrumentos de vuelo nocturno (aviación general)",
+      "thesis": "Seis diales luminosos sostienen la confianza del piloto entre nubes — aquí, sostienen la confianza del comprador.",
+      "palette": ["#05070a", "#39ff88", "#ea580c"],
+      "materials": ["panel matte black", "agujas con glow radium", "vidrio de instrumento"],
+      "viewport": "Seis diales en vivo (precio, countdown, estado de endoso) sobre panel negro; el buscador de lucIA como lectura de instrumento adicional.",
+      "case": "Fusiona bien el estado 'en vivo/verificado' con precisión de instrumento; pierde por poco en identificación porque el lenguaje de cabina de piloto es menos universal que el de un pasajero mirando un tablero de salidas.",
+      "risk": "Puede sentirse más 'para el piloto' que 'para el pasajero' si no se ancla bien al contexto de compra."
+    },
+    {
+      "id": "challenger-saul-bass-title",
+      "label": "Secuencia Saul Bass",
+      "verdict": "competitive",
+      "lineage": "Títulos de crédito de Saul Bass — cut-paper, una idea por tarjeta",
+      "thesis": "Cada paso del proceso de escrow es su propia tarjeta a sangre completa de color plano, como una secuencia de créditos.",
+      "palette": ["#ea580c", "#1c1917", "#faf7f2"],
+      "materials": ["formas cut-paper", "campo de color plano", "tipografía skinny caps"],
+      "viewport": "Secuencia de tarjetas de color sólido, una por paso del proceso (pago confirmado, trámite, verificación, liberado).",
+      "case": "Muy fuerte para narrar el proceso de escrow paso a paso; pierde frente al panel de aeropuerto en identificación inmediata del producto (vuelos) en el primer viewport.",
+      "risk": "Si se usa en todo el home pierde la especificidad aeronáutica del producto."
+    },
+    {
+      "id": "challenger-hand-drawn-zine",
+      "label": "Zine Dibujado a Mano",
+      "verdict": "declined",
+      "lineage": "Zine técnico dibujado a mano, mascota guía",
+      "case": "Fusiona mal: la calidez de cuaderno/marcador debilita la confianza necesaria para un producto que retiene dinero en escrow.",
+      "kept": "La calidez de una mascota-guía amigable (aplicada a lucIA, no al sistema completo)."
+    },
+    {
+      "id": "challenger-paper-menagerie",
+      "label": "Autómatas de Papel",
+      "verdict": "declined",
+      "lineage": "Menagerie de papel a manivela, bisagras y fuelles",
+      "case": "Fusiona mal: el mundo artesanal/juguete no conecta con viajes ni con dinero en garantía.",
+      "kept": "La satisfacción táctil de un mecanismo físico (aplicada como transición de flip del tablero, no como estética general)."
+    },
+    {
+      "id": "challenger-neon-circuit",
+      "label": "Circuito de Neón",
+      "verdict": "declined",
+      "lineage": "Letrero de neón soplado a mano",
+      "case": "Fusiona mal: el neón evoca vida nocturna/bares, no aviación ni confianza financiera.",
+      "kept": "El tratamiento de brillo backlit en el borde de paneles clave."
+    },
+    {
+      "id": "challenger-constructivist-train",
+      "label": "Tren Agitprop Constructivista",
+      "verdict": "declined",
+      "lineage": "Cartel constructivista soviético, cuñas diagonales",
+      "case": "Fusiona mal: el lenguaje revolucionario/propaganda no es la voz de marca de Buelazo.",
+      "kept": "La cuña diagonal como dispositivo de urgencia, reservada solo para la sección 'Última llamada'."
+    }
+  ],
+  "reroll": { "registers": ["safer", "bolder"] },
+  "buildPath": { "value": "code" },
+  "canon": true,
+  "canonCard": {
+    "label": "El estándar de la categoría",
+    "thesis": "El hero SaaS de gradiente suave con tarjetas flotantes redondeadas — lo que ya existe hoy y lo que casi todo sitio de viajes/fintech usa.",
+    "palette": ["#ea580c", "#0f172a", "#f8fafc"],
+    "materials": ["gradiente suave", "tarjetas flotantes con sombra", "iconos redondeados"],
+    "viewport": "Hero de gradiente azul/oscuro con tarjetas flotando, exactamente el layout actual del sitio.",
+    "risk": "Indistinguible de cualquier competidor — es precisamente lo que se pidió dejar atrás."
+  },
+  "steer": true
+}

@@ -1,25 +1,34 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowRight,
   ShieldCheck,
-  Lock,
   Clock3,
-  Tag,
   ClipboardCheck,
   MessageCircle,
   Bell,
   CheckCircle2,
   Sparkles,
+  Search,
+  MapPin,
+  CalendarRange,
 } from "lucide-react";
-import { testimonials, airports } from "@/lib/mock-data";
-import { activeFlights, lastCallFlights, tramoVigente } from "@/lib/flight-utils";
+import { testimonials, airportsList } from "@/lib/mock-data";
+import {
+  activeFlights,
+  lastCallFlights,
+  tramoVigente,
+  fmtDay,
+  fmtTime,
+  discountPct,
+  totalAPagar,
+  S,
+} from "@/lib/flight-utils";
 import { getActiveFlights } from "@/lib/services/flights";
 import { FlightCard } from "@/components/site/FlightCard";
 import { ChatAgentAvatar } from "@/components/site/agent-chat/ChatAgentAvatar";
-import { DestinosTopSlider, type DestinoTopItem } from "@/components/site/DestinosTopSlider";
 import { useAuth } from "@/lib/auth-context";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useMemo, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
@@ -29,8 +38,7 @@ gsap.registerPlugin(useGSAP, ScrollTrigger);
 
 // Sin librería de fotos por ciudad todavía — un mapa curado a mano por código
 // de aeropuerto es la forma más honesta de mostrar una foto real sin inventar
-// una integración que no existe. El destino en sí (qué ciudad se muestra) sí
-// es real: se calcula abajo según qué ruta tiene más publicaciones activas.
+// una integración que no existe.
 const DESTINO_FOTO: Record<string, string> = {
   CUZ: "https://images.unsplash.com/photo-1587595431973-160d0d94add1?w=800&q=80",
   AQP: "https://images.unsplash.com/photo-1531968455001-5c5272a41129?w=800&q=80",
@@ -42,6 +50,32 @@ const DESTINO_FOTO: Record<string, string> = {
   LIM: "https://images.unsplash.com/photo-1531968455001-5c5272a41129?w=800&q=80",
 };
 const DESTINO_DEFAULT = "CUZ";
+
+// Mismos presets de rango que ya usa /explore (RangoPreset) — el home no
+// hace búsqueda por fecha exacta, así que se reusa el mismo vocabulario en
+// vez de inventar un control de fecha aparte.
+const RANGO_OPCIONES = [
+  { value: "semana", label: "Próxima semana" },
+  { value: "quince", label: "Próximos 15 días" },
+  { value: "mes", label: "Próximo mes" },
+] as const;
+
+// Copy rotativo del titular: solo remezcla frases que ya son ciertas y ya
+// aparecen en el resto de la página (nada nuevo, ningún claim inventado).
+// Cada frase debe cerrar gramaticalmente "Vuelos que otros no pueden usar,
+// ___" — "y en minutos." se sacó por eso (pertenecía a "publica el tuyo en
+// minutos", un sujeto distinto, y sonaba desordenado acá).
+const TITULAR_ROTATIVO = [
+  "a mitad de precio.",
+  "con pago seguro.",
+  "con endoso seguro.",
+  "sin perder dinero.",
+];
+const TITULAR_ROTATIVO_MS = 3200;
+
+// Autoplay de la card destacada del hero — mismo intervalo que ya usaba el
+// slider de destinos que reemplaza.
+const DESTACADO_AUTOPLAY_MS = 4500;
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -58,6 +92,7 @@ export const Route = createFileRoute("/")({
 
 function Landing() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { data: fetchedFlights = [], isLoading } = useQuery({
     queryKey: ["flights", "active"],
     queryFn: getActiveFlights,
@@ -65,30 +100,63 @@ function Landing() {
   const highlighted = activeFlights(fetchedFlights).slice(0, 4);
   const lastCallCount = lastCallFlights(fetchedFlights).length;
 
-  // Top 3 destinos reales: los códigos de destino con más publicaciones activas
-  // ahora mismo, no un dato inventado ni fijo.
-  const destinosTop: DestinoTopItem[] = useMemo(() => {
-    const conteo: Record<string, number> = {};
-    for (const f of fetchedFlights) {
-      const code = tramoVigente(f).destination.code;
-      conteo[code] = (conteo[code] ?? 0) + 1;
-    }
-    const top3 = Object.entries(conteo)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-    if (top3.length === 0) {
-      const a = airports[DESTINO_DEFAULT];
-      return [
-        { code: DESTINO_DEFAULT, city: a.city, foto: DESTINO_FOTO[DESTINO_DEFAULT], count: 0 },
-      ];
-    }
-    return top3.map(([code, count]) => ({
-      code,
-      city: airports[code]?.city ?? code,
-      foto: DESTINO_FOTO[code] ?? DESTINO_FOTO[DESTINO_DEFAULT],
-      count,
-    }));
-  }, [fetchedFlights]);
+  // Buscador manual del hero: mismos parámetros reales que ya acepta
+  // /explore (from/to/rango) — nada simulado, un submit real. Sin fecha
+  // exacta: el home solo ofrece los mismos rangos flexibles de /explore.
+  const [origen, setOrigen] = useState("LIM");
+  const [destino, setDestino] = useState("");
+  const [rango, setRango] = useState<(typeof RANGO_OPCIONES)[number]["value"]>("mes");
+
+  function buscar(e: React.FormEvent) {
+    e.preventDefault();
+    navigate({
+      to: "/explore",
+      search: {
+        from: origen || undefined,
+        to: destino || undefined,
+        rango,
+      } as never,
+    });
+  }
+
+  // Titular rotativo: cicla solo la frase después de la coma, en loop, sin
+  // depender de interacción — pausa si el usuario prefiere menos movimiento.
+  // Crossfade real (no solo un fade-in): primero se desvanece la frase
+  // vigente, recién entonces entra la siguiente — un corte seco de por medio
+  // se sentía "rápido" sin importar cuán suave fuera la entrada sola.
+  const [tituloIndex, setTituloIndex] = useState(0);
+  const [tituloSaliendo, setTituloSaliendo] = useState(false);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    let salidaTimeout: ReturnType<typeof setTimeout>;
+    const id = setInterval(() => {
+      setTituloSaliendo(true);
+      salidaTimeout = setTimeout(() => {
+        setTituloIndex((i) => (i + 1) % TITULAR_ROTATIVO.length);
+        setTituloSaliendo(false);
+      }, 450);
+    }, TITULAR_ROTATIVO_MS);
+    return () => {
+      clearInterval(id);
+      clearTimeout(salidaTimeout);
+    };
+  }, []);
+
+  // Carrusel de la oferta destacada del hero: rota entre vuelos activos
+  // reales (mismo criterio que "Disponibles ahora"), nunca datos de muestra.
+  const [destacadoIndex, setDestacadoIndex] = useState(0);
+  const [destacadoAutoplay, setDestacadoAutoplay] = useState(true);
+  useEffect(() => {
+    if (!destacadoAutoplay || highlighted.length <= 1) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const id = setInterval(() => {
+      setDestacadoIndex((i) => (i + 1) % highlighted.length);
+    }, DESTACADO_AUTOPLAY_MS);
+    return () => clearInterval(id);
+  }, [destacadoAutoplay, highlighted.length]);
+
+  const destacado = highlighted[destacadoIndex % (highlighted.length || 1)];
+  const destacadoTramo = destacado ? tramoVigente(destacado) : null;
 
   const heroRef = useRef<HTMLDivElement>(null);
 
@@ -101,25 +169,13 @@ function Landing() {
         stagger: 0.1,
         ease: "power2.out",
       });
-      gsap.from(".bento-card", {
-        scale: 0.95,
-        opacity: 0,
-        duration: 0.5,
-        stagger: 0.05,
-        ease: "back.out(1.2)",
-        delay: 0.2,
-      });
     },
     { scope: heroRef },
   );
 
-  // Igual que en Explorar: se dispara una sola vez, cuando la carga termina —
-  // nunca al mount con la lista todavía vacía, ni de nuevo después.
   useGSAP(
     () => {
       if (isLoading) return;
-      // set() + to() en vez de from(): ver explore.tsx para el motivo (el
-      // primer elemento de un stagger con from() puede quedar sin animar).
       gsap.set(".flight-anim", { y: 40, opacity: 0 });
       gsap.to(".flight-anim", {
         y: 0,
@@ -134,10 +190,6 @@ function Landing() {
     { scope: heroRef, dependencies: [isLoading] },
   );
 
-  // Entrada al hacer scroll para "Así funciona" y "Por qué confiar": cada
-  // .scroll-elem arranca invisible/desplazado y se anima al entrar al
-  // viewport — batch() para que las 4 cards de confianza entren juntas con
-  // stagger en vez de una por una. once:true, no se repite al volver a subir.
   useGSAP(
     () => {
       const elems = gsap.utils.toArray<HTMLElement>(".scroll-elem");
@@ -161,76 +213,268 @@ function Landing() {
 
   return (
     <div ref={heroRef} className="pb-20">
-      {/* Hero Bento Grid */}
-      <section className="mx-auto max-w-7xl px-4 pt-8 md:pt-12 sm:px-6">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 auto-rows-[180px] md:auto-rows-[240px]">
-          {/* Main Value Prop */}
-          <div className="bento-card md:col-span-8 md:row-span-2 rounded-[2rem] bg-[var(--color-ink)] p-8 md:p-12 text-white flex flex-col justify-center relative overflow-hidden">
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-bold uppercase tracking-wider backdrop-blur-md mb-6">
-                <span className="h-2 w-2 rounded-full bg-[var(--color-secondary-token)]" />
-                El marketplace peruano de pasajes
-              </div>
-              <h1 className="font-display text-4xl md:text-6xl font-extrabold leading-[1.1] tracking-tight">
-                Vuelos que otros no pueden usar,
-                <br />
-                <span className="text-[var(--color-primary-token)]">a mitad de precio.</span>
-              </h1>
-              <p className="mt-4 max-w-md text-gray-300 font-medium">
-                Compra boletos endosados con pago retenido en garantía o publica el tuyo en minutos.
-              </p>
-              <div className="mt-8 flex flex-wrap items-center gap-3">
-                <Link
-                  to="/explore"
-                  className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95"
-                >
-                  Explorar ofertas <ArrowRight className="h-4 w-4" />
-                </Link>
-                <Link
-                  to="/publish"
-                  className="inline-flex items-center gap-2 rounded-full bg-white/10 px-6 py-3 text-sm font-bold text-white hover:bg-white/20 transition-colors"
-                >
-                  Vender mi pasaje
-                </Link>
-              </div>
+      {/* ============================================================
+          HERO — cálido y directo: buscador manual real + oferta
+          destacada, look inspirado en marketplaces de confianza masivos
+          (inDrive/Airbnb), no en un panel "técnico".
+          ============================================================ */}
+      <section className="mx-auto max-w-7xl px-4 pt-10 sm:px-6 md:pt-16">
+        <div className="grid gap-10 md:grid-cols-12 md:items-center md:gap-8">
+          <div className="hero-elem md:col-span-7">
+            <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)]/10 px-3.5 py-1.5 text-xs font-bold text-[var(--color-secondary-token)]">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Endoso verificado y pago protegido
             </div>
-            {/* Background Image subtle overlay */}
-            <img
-              src="https://images.unsplash.com/photo-1522814701227-6f8e77a16e5f?w=800&q=80"
-              alt="People traveling"
-              className="absolute inset-0 w-full h-full object-cover opacity-20 mix-blend-overlay"
-            />
-          </div>
 
-          {/* Top 3 destinos: se calculan solos, según qué rutas tienen más
-              publicaciones activas — slider con autoplay y navegación manual. */}
-          <DestinosTopSlider destinos={destinosTop} />
-
-          {/* Trust Banner */}
-          <div className="bento-card md:col-span-2 md:row-span-1 rounded-[2rem] bg-[var(--color-secondary-token)] p-6 text-white flex flex-col justify-center">
-            <ShieldCheck className="h-8 w-8 mb-3" />
-            <h3 className="font-display font-bold leading-tight">Endoso seguro y validado</h3>
-          </div>
-
-          {/* Promoción */}
-          <div className="bento-card md:col-span-2 md:row-span-1 rounded-[2rem] bg-white border border-border p-6 flex flex-col justify-center shadow-sm">
-            <Tag className="h-7 w-7 text-[var(--color-primary-token)] mb-3" />
-            <h3 className="font-display font-bold text-[var(--color-ink)] leading-tight text-lg">
-              Ahorra hasta 80%
-            </h3>
-            <p className="text-xs text-muted-foreground mt-1 font-medium">
-              En vuelos última llamada
+            {/* 3 líneas fijas siempre, con <br> explícitos en vez de dejar
+                que el wrap natural decida — así ninguna frase rotativa
+                cambia el alto del título ni empuja el resto del hero. */}
+            <div className="relative">
+              <img
+                src="/assets/3d/avion-hero.webp"
+                alt=""
+                className="pointer-events-none absolute right-4 top-8 z-10 hidden w-28 select-none object-contain sm:block sm:right-6 sm:top-10 sm:w-36 md:right-10 md:top-12 md:w-44"
+              />
+              <h1 className="mt-5 font-display text-[1.75rem] font-extrabold leading-[1.2] tracking-tight text-[var(--color-ink)] sm:text-5xl sm:leading-[1.1] md:text-[3.25rem]">
+                Vuelos que otros no
+                <br />
+                pueden usar,
+                <br />
+                <span
+                  key={tituloIndex}
+                  className={`inline-block bg-clip-text text-transparent ${
+                    tituloSaliendo ? "animate-fade-out-smooth" : "animate-fade-in-smooth"
+                  }`}
+                  style={{
+                    backgroundImage:
+                      "linear-gradient(90deg, var(--color-primary-token), var(--color-accent-token))",
+                  }}
+                >
+                  {TITULAR_ROTATIVO[tituloIndex]}
+                </span>
+              </h1>
+            </div>
+            <p className="mt-4 max-w-lg text-base font-medium text-muted-foreground">
+              Compra boletos endosados con{" "}
+              <span className="font-bold text-[var(--color-ink)]">pago retenido en garantía</span> o
+              publica el tuyo en minutos.
             </p>
+
+            {/* Buscador manual — mismo mecanismo real que /explore */}
+            <form
+              onSubmit={buscar}
+              className="mt-7 flex flex-col gap-2 rounded-[1.75rem] border border-border bg-white p-2.5 shadow-sm sm:flex-row sm:items-center sm:rounded-full"
+            >
+              <label className="flex flex-1 items-center gap-2.5 px-4 py-2.5 sm:border-r sm:border-border">
+                <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="sr-only">Origen</span>
+                <select
+                  value={origen}
+                  onChange={(e) => setOrigen(e.target.value)}
+                  className="w-full bg-transparent text-sm font-semibold text-[var(--color-ink)] focus:outline-none"
+                >
+                  {airportsList.map((a) => (
+                    <option key={a.code} value={a.code}>
+                      {a.city} ({a.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-1 items-center gap-2.5 px-4 py-2.5 sm:border-r sm:border-border">
+                <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="sr-only">Destino</span>
+                <select
+                  value={destino}
+                  onChange={(e) => setDestino(e.target.value)}
+                  className="w-full bg-transparent text-sm font-semibold text-[var(--color-ink)] focus:outline-none"
+                >
+                  <option value="">Cualquier destino</option>
+                  {airportsList
+                    .filter((a) => a.code !== origen)
+                    .map((a) => (
+                      <option key={a.code} value={a.code}>
+                        {a.city} ({a.code})
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="flex flex-1 items-center gap-2.5 px-4 py-2.5">
+                <CalendarRange className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="sr-only">Rango de fechas</span>
+                <select
+                  value={rango}
+                  onChange={(e) => setRango(e.target.value as typeof rango)}
+                  className="w-full bg-transparent text-sm font-semibold text-[var(--color-ink)] focus:outline-none"
+                >
+                  {RANGO_OPCIONES.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                aria-label="Buscar vuelos"
+                className="grid h-12 w-12 shrink-0 place-items-center self-end rounded-full bg-[var(--color-primary-token)] text-white transition-transform hover:scale-105 active:scale-95 sm:self-auto"
+              >
+                <Search className="h-4.5 w-4.5" />
+              </button>
+            </form>
+            <Link
+              to="/explore"
+              search={{ agente: "1" }}
+              className="mt-3 inline-flex items-center gap-1.5 pl-1 text-sm font-bold text-[var(--color-accent-token)] hover:underline"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              ¿Prefieres solo decirle a lucIA a dónde quieres ir?
+            </Link>
+
+            {/* "Explorar todas las ofertas" se quitó: el buscador de arriba
+                ya lleva a /explore, tenerlo aparte era el mismo destino dos
+                veces. "Vender mi pasaje" se queda solo, pero ahora con
+                contexto propio (a qué escenario responde) en vez de un botón
+                suelto sin explicación. */}
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-dashed border-border bg-white/70 px-5 py-4">
+              <div>
+                <div className="text-sm font-bold text-[var(--color-ink)]">
+                  ¿Tienes un pasaje que ya no puedes usar?
+                </div>
+                <p className="mt-0.5 text-xs font-medium text-muted-foreground">
+                  Publícalo en minutos y recupera parte de tu dinero.
+                </p>
+              </div>
+              <Link
+                to="/publish"
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-border bg-white px-6 py-3 text-sm font-bold text-[var(--color-ink)] transition-colors hover:bg-muted"
+              >
+                Vender mi pasaje
+              </Link>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-semibold text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-secondary-token)]" />
+                Pago retenido en garantía
+              </span>
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-secondary-token)]" />
+                Revisión antes de publicar
+              </span>
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--color-secondary-token)]" />
+                Validado con la aerolínea
+              </span>
+            </div>
           </div>
+
+          {/* Oferta destacada: rota entre vuelos activos reales — nunca una
+              tarjeta de muestra fija. La caja de la card nunca se remonta:
+              las fotos se apilan y hacen crossfade entre sí (como el slider
+              de destinos que reemplazó), y solo el texto se desvanece — así
+              no hay parpadeo ni microsalto al cambiar de oferta. */}
+          {destacado && destacadoTramo && (
+            <div className="hero-elem md:col-span-5">
+              <Link
+                to="/flight/$id"
+                params={{ id: destacado.id }}
+                className="group block overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-md transition-transform hover:-translate-y-1"
+              >
+                <div className="relative h-44">
+                  {highlighted.map((f, i) => {
+                    const t = tramoVigente(f);
+                    const foto = DESTINO_FOTO[t.destination.code] ?? DESTINO_FOTO[DESTINO_DEFAULT];
+                    const activo = i === destacadoIndex % highlighted.length;
+                    return (
+                      <div
+                        key={f.id}
+                        aria-hidden={!activo}
+                        className={`absolute inset-0 transition-opacity duration-700 ease-out ${
+                          activo ? "opacity-100" : "opacity-0"
+                        }`}
+                      >
+                        <img
+                          src={foto}
+                          alt={t.destination.city}
+                          className="h-full w-full object-cover"
+                        />
+                        <span className="absolute left-4 top-4 rounded-full bg-black/50 px-3 py-1 text-[11px] font-bold uppercase tracking-wide text-white backdrop-blur-sm">
+                          Destino {t.destination.city}
+                        </span>
+                        <span className="absolute right-4 top-4 rounded-full bg-[var(--color-secondary-token)] px-3 py-1 text-[11px] font-bold text-white">
+                          −{discountPct(f)}% dcto
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div key={destacado.id} className="animate-fade-in p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="font-display text-xl font-bold text-[var(--color-ink)]">
+                      {destacadoTramo.origin.code} → {destacadoTramo.destination.code}
+                    </div>
+                    <div className="text-right">
+                      <div className="text-xs text-muted-foreground line-through">
+                        {S(destacado.originalPrice)}
+                      </div>
+                      <div className="font-display text-xl font-extrabold text-[var(--color-primary-token)]">
+                        {S(totalAPagar(destacado))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-1 text-xs font-medium text-muted-foreground">
+                    Salida {fmtDay(destacadoTramo.departureAt)} · {fmtTime(destacadoTramo.departureAt)}{" "}
+                    · {destacado.airline}
+                  </div>
+                  <div className="mt-4 flex items-center gap-2.5 border-t border-dashed border-border pt-4">
+                    <Avatar className="h-7 w-7 border border-border">
+                      <AvatarImage
+                        src={destacado.seller.avatarUrl}
+                        alt={destacado.seller.name}
+                      />
+                      <AvatarFallback className="text-xs font-bold text-gray-500">
+                        {destacado.seller.name[0]}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-xs font-medium text-muted-foreground">
+                      Vendido por {destacado.seller.name}
+                    </span>
+                    {destacado.seller.verifiedId && (
+                      <span className="ml-auto flex items-center gap-1 text-[11px] font-bold text-[var(--color-secondary-token)]">
+                        <ShieldCheck className="h-3.5 w-3.5" /> Verificado
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </Link>
+              {highlighted.length > 1 && (
+                <div className="mt-3 flex items-center justify-center gap-1.5">
+                  {highlighted.map((f, i) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => {
+                        setDestacadoAutoplay(false);
+                        setDestacadoIndex(i);
+                      }}
+                      aria-label={`Ver oferta destacada ${i + 1}`}
+                      className={`h-1.5 rounded-full transition-all ${
+                        i === destacadoIndex % highlighted.length
+                          ? "w-5 bg-[var(--color-primary-token)]"
+                          : "w-1.5 bg-border hover:bg-muted-foreground/40"
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* lucIA: la ventaja competitiva de tener un agente conversacional real
-          (no un formulario de filtros como la competencia) — estética propia
-          de producto de IA (gradiente coral/acento, avatar con Sparkles),
-          distinta del bloque oscuro de "Así funciona" más abajo. */}
-      <section className="mx-auto max-w-7xl px-4 pt-16 sm:px-6">
-        <div className="scroll-elem relative overflow-hidden rounded-[2rem] bg-[var(--color-ink)] p-8 md:p-14">
+      {/* lucIA: el agente conversacional real, no un formulario de filtros. */}
+      <section className="mx-auto max-w-7xl px-4 pt-16 sm:px-6 md:pt-20">
+        <div className="scroll-elem relative overflow-hidden rounded-[1.75rem] bg-[var(--color-ink)] p-8 md:p-14">
           <div
             aria-hidden
             className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-[var(--color-primary-token)]/25 blur-3xl"
@@ -384,72 +628,101 @@ function Landing() {
         )}
       </section>
 
-      {/* Así funciona: el mismo timeline de protección escrow que ya usa el
-          detalle del vuelo, condensado como teaser para quien todavía no entra
-          a una compra o venta. */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 pt-24 pb-8 md:pt-28">
-        <div className="scroll-elem relative overflow-hidden rounded-[2rem] bg-[var(--color-ink)] p-8 md:p-12">
-          <div
-            className="pointer-events-none absolute -right-20 -top-24 h-72 w-72 rounded-full opacity-60 blur-2xl"
-            style={{
-              background:
-                "linear-gradient(135deg, var(--color-primary-token), var(--color-accent-token))",
-            }}
-            aria-hidden
-          />
-          <div
-            className="pointer-events-none absolute -bottom-24 right-24 h-48 w-48 rounded-full bg-[var(--color-secondary-token)] opacity-30 blur-2xl"
-            aria-hidden
-          />
-
-          <h2 className="relative font-display text-3xl font-extrabold text-white md:text-4xl">
-            Así funciona
-          </h2>
-
-          <div className="relative mt-8 grid gap-6 md:grid-cols-3 md:gap-10">
-            {[
-              {
-                Icon: ClipboardCheck,
-                title: "Publica o encuentra tu vuelo",
-                desc: "Cada publicación pasa por una revisión antes de salir al público, así que lo que ves ya fue verificado.",
-              },
-              {
-                Icon: Lock,
-                title: "El pago queda retenido",
-                desc: "Buelazo guarda el dinero en garantía. No se libera al vendedor hasta que el comprador confirma que todo salió bien.",
-              },
-              {
-                Icon: CheckCircle2,
-                title: "Se confirma el traspaso",
-                desc: "Verificamos que el boleto quedó a nombre del comprador y ahí recién se libera el pago al vendedor.",
-              },
-            ].map(({ Icon, title, desc }) => (
-              <div key={title}>
-                <span className="grid h-12 w-12 place-items-center rounded-full bg-[var(--color-secondary-token)]">
-                  <Icon className="h-6 w-6 text-white" />
-                </span>
-                <div className="mt-3 text-sm font-bold text-white">{title}</div>
-                <p className="mt-1 text-xs font-medium leading-relaxed text-white/70">{desc}</p>
-              </div>
-            ))}
+      {/* Cómo funciona el traspaso seguro: 3 pasos claros + una barra oscura
+          que invita a la página completa de confianza/legal. */}
+      <section className="mx-auto max-w-7xl px-4 pt-8 pb-8 sm:px-6 md:pt-12">
+        <div className="scroll-elem text-center">
+          <div className="inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)]/10 px-3.5 py-1.5 text-xs font-bold text-[var(--color-secondary-token)]">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Transferencia segura garantizada
           </div>
-
-          <Link
-            to="/trust"
-            className="relative mt-8 inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 text-sm font-bold text-[var(--color-ink)] transition-transform hover:scale-105 active:scale-95"
-          >
-            Ver cómo funciona <ArrowRight className="h-4 w-4" />
-          </Link>
+          <h2 className="mx-auto mt-4 max-w-xl font-display text-3xl font-extrabold text-[var(--color-ink)] md:text-4xl">
+            ¿Cómo funciona el traspaso seguro?
+          </h2>
+          <p className="mx-auto mt-3 max-w-xl text-sm font-medium text-muted-foreground">
+            Tu dinero nunca toca la cuenta del vendedor hasta que el pasaje quede confirmado a tu
+            nombre.
+          </p>
         </div>
+
+        <div className="mt-10 grid gap-5 md:grid-cols-3">
+          {[
+            {
+              n: "01",
+              color: "var(--color-primary-token)",
+              img: "/assets/3d/paso-1-buscar.webp",
+              title: "Publica o encuentra tu vuelo",
+              desc: "Cada publicación pasa por una revisión manual antes de salir al público, así que lo que ves ya fue verificado.",
+            },
+            {
+              n: "02",
+              color: "var(--color-accent-token)",
+              img: "/assets/3d/paso-2-pago.webp",
+              title: "El pago queda retenido",
+              desc: "Buelazo guarda el dinero en garantía. No se libera al vendedor hasta que el comprador confirma que todo salió bien.",
+            },
+            {
+              n: "03",
+              color: "var(--color-secondary-token)",
+              img: "/assets/3d/paso-3-traspaso.webp",
+              title: "Se confirma el traspaso",
+              desc: "Verificamos que el boleto quedó a nombre del comprador y ahí recién se libera el pago al vendedor.",
+            },
+          ].map(({ n, color, img, title, desc }) => (
+            <div
+              key={title}
+              className="scroll-elem flex flex-col rounded-[1.75rem] border border-border bg-white p-6 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <h3 className="font-display text-lg font-bold text-[var(--color-ink)]">
+                  {title}
+                </h3>
+                <span
+                  className="shrink-0 font-display text-2xl font-extrabold"
+                  style={{ color }}
+                >
+                  {n}
+                </span>
+              </div>
+              <p className="mt-2 max-w-[85%] text-sm font-medium leading-relaxed text-muted-foreground">
+                {desc}
+              </p>
+              <img
+                src={img}
+                alt=""
+                className="mt-3 h-28 w-28 self-end object-contain sm:h-32 sm:w-32"
+              />
+            </div>
+          ))}
+        </div>
+
+        <Link
+          to="/trust"
+          className="scroll-elem mt-6 flex items-center justify-between gap-4 rounded-[1.75rem] bg-[var(--color-ink)] px-6 py-5 transition-transform hover:scale-[1.01]"
+        >
+          <div>
+            <div className="text-sm font-bold text-white">
+              Transferencia de pasajes 100% legal en Perú
+            </div>
+            <div className="mt-0.5 text-xs font-medium text-white/60">
+              El endoso ante la aerolínea es un trámite oficial — mira el detalle completo.
+            </div>
+          </div>
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-white px-4 py-2 text-xs font-bold text-[var(--color-ink)]">
+            Ver cómo funciona <ArrowRight className="h-3.5 w-3.5" />
+          </span>
+        </Link>
       </section>
 
-      {/* Por qué confiar: diferenciadores reales de Buelazo, no genéricos —
-          los mismos que ya sostienen el resto del producto (escrow, revisión
-          manual, chat interno, alertas de ruta). */}
-      <section className="mx-auto max-w-7xl px-4 sm:px-6 pt-16 pb-20 md:pt-20 md:pb-24">
-        <h2 className="mb-10 text-center font-display text-3xl font-extrabold text-[var(--color-ink)]">
-          ¿Por qué confiar en Buelazo?
+      {/* Por qué confiar: diferenciadores reales de Buelazo. */}
+      <section className="mx-auto max-w-7xl px-4 pt-16 pb-20 sm:px-6 md:pt-20 md:pb-24">
+        <h2 className="mb-2 text-center font-display text-3xl font-extrabold text-[var(--color-ink)]">
+          ¿Por qué confían los peruanos en Buelazo?
         </h2>
+        <p className="mx-auto mb-10 max-w-lg text-center text-sm font-medium text-muted-foreground">
+          Diseñado para eliminar la desconfianza de comprar en Facebook Marketplace o grupos de
+          WhatsApp.
+        </p>
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {[
             {
@@ -475,7 +748,7 @@ function Landing() {
           ].map(({ Icon, title, desc }) => (
             <div
               key={title}
-              className="scroll-elem rounded-[2rem] border border-border bg-white p-6 shadow-sm"
+              className="scroll-elem rounded-[1.75rem] border border-border bg-white p-6 shadow-sm"
             >
               <div className="grid h-11 w-11 place-items-center rounded-full bg-[var(--color-secondary-token)]/10 text-[var(--color-secondary-token)]">
                 <Icon className="h-5 w-5" />
@@ -492,18 +765,22 @@ function Landing() {
       </section>
 
       {/* Testimonials — roll banner: la pista duplica la lista una vez y se
-          desplaza sola a velocidad sutil; se detiene con el mouse encima para
-          poder leer con calma. */}
+          desplaza sola a velocidad sutil; se detiene con el mouse encima. */}
       <section className="pb-16 pt-4 hero-elem">
-        <h2 className="font-display text-3xl font-extrabold text-[var(--color-ink)] mb-8 text-center px-4">
-          Viajeros que ya la pasaron Buelazo
-        </h2>
+        <div className="mb-8 px-4 text-center">
+          <div className="text-xs font-bold uppercase tracking-widest text-[var(--color-primary-token)]">
+            Experiencias reales
+          </div>
+          <h2 className="mt-1 font-display text-3xl font-extrabold text-[var(--color-ink)]">
+            Viajeros que ya la pasaron Buelazo
+          </h2>
+        </div>
         <div className="group overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_5%,black_95%,transparent)]">
           <div className="flex w-max animate-marquee gap-6 px-4 [@media(hover:hover)_and_(pointer:fine)]:group-hover:[animation-play-state:paused]">
             {[...testimonials, ...testimonials].map((t, i) => (
               <figure
                 key={`${t.name}-${i}`}
-                className="flex w-80 shrink-0 flex-col justify-between rounded-[2rem] bg-white border border-border p-8 shadow-sm"
+                className="flex w-80 shrink-0 flex-col justify-between rounded-[1.75rem] bg-white border border-border p-8 shadow-sm"
               >
                 <blockquote className="font-sans text-lg font-medium leading-snug text-[var(--color-ink)]">
                   "{t.quote}"
@@ -520,6 +797,45 @@ function Landing() {
                 </figcaption>
               </figure>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* CTA de cierre: mismas dos acciones de siempre, resumidas al final
+          de la página para quien llegó hasta acá sin decidirse todavía. */}
+      <section className="mx-auto max-w-7xl px-4 pb-4 sm:px-6">
+        <div className="scroll-elem relative overflow-hidden rounded-[1.75rem] bg-[var(--color-ink)] px-6 py-12 text-center sm:px-12">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-16 -top-16 h-64 w-64 rounded-full bg-[var(--color-accent-token)]/20 blur-3xl"
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -bottom-20 -right-10 h-64 w-64 rounded-full bg-[var(--color-primary-token)]/20 blur-3xl"
+          />
+          <div className="relative mx-auto inline-flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 text-xs font-bold text-white">
+            <ShieldCheck className="h-3.5 w-3.5" />
+            Garantía Buelazo
+          </div>
+          <h2 className="relative mx-auto mt-4 max-w-xl font-display text-2xl font-extrabold text-white sm:text-3xl">
+            ¿Tienes un pasaje que no vas a usar o quieres volar por mucho menos?
+          </h2>
+          <p className="relative mx-auto mt-3 max-w-md text-sm font-medium text-white/60">
+            Publicar toma solo unos minutos y buscar vuelos es completamente gratis.
+          </p>
+          <div className="relative mt-7 flex flex-wrap items-center justify-center gap-3">
+            <Link
+              to="/explore"
+              className="inline-flex items-center gap-2 rounded-full bg-[var(--color-primary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95"
+            >
+              Explorar vuelos disponibles <ArrowRight className="h-4 w-4" />
+            </Link>
+            <Link
+              to="/publish"
+              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-6 py-3 text-sm font-bold text-white transition-colors hover:bg-white/10"
+            >
+              Publicar mi pasaje
+            </Link>
           </div>
         </div>
       </section>

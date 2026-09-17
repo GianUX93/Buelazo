@@ -1,7 +1,7 @@
 # Buelazo — Documento Maestro
 
 **Estado:** Prototipo funcional con **backend real** (Supabase: base de datos, autenticación, almacenamiento de archivos, tiempo real) + **agente conversacional real** (n8n + IA) · **Propósito:** negocio real + pieza de portafolio
-**Última actualización:** septiembre 2026
+**Última actualización:** 12 de septiembre de 2026
 **Nota de marca:** el producto se llamó "Traspaso" durante buena parte del desarrollo; el nombre comercial es ahora **Buelazo**. La palabra minúscula "traspaso" se sigue usando en el copy como el sustantivo genérico de la acción de transferir un pasaje (ej. "Traspaso confirmado") — no es un residuo de marca, es intencional.
 
 ---
@@ -79,6 +79,8 @@ Este es uno de los pilares que más distingue a Buelazo de la competencia:
 - **Reportar un problema pausa el dinero, no lo pierde**: si algo sale mal en cualquier punto del trámite (por ejemplo, la aerolínea rechaza el cambio de nombre), cualquiera de las dos partes puede reportarlo. El pago queda protegido y en pausa, y si se confirma que el traspaso no se pudo completar, se reembolsa.
 - **Notificaciones instantáneas de cada paso**: ninguna de las dos partes tiene que estar revisando la plataforma constantemente para enterarse de un avance — las notificaciones llegan en tiempo real.
 - **lucIA nunca expone datos internos ni de otros vendedores**: el agente conversacional nunca muestra el cargo de aerolínea, ni la publicación propia del comprador que está chateando, ni ningún campo interno de la base de datos — solo lo mismo que ya es público en el marketplace.
+- **Identidad verificada, no reputación de popularidad**: se decidió explícitamente **no** construir un sistema de calificación por estrellas o reseñas. La mayoría de vendedores usa la plataforma una sola vez (vendió un pasaje que no pudo usar), así que un puñado de reseñas con 0-1 calificaciones sería ruido — y podría restar confianza en vez de sumarla. La señal de confianza real es institucional: revisión manual de cada publicación, pago retenido en escrow, confirmación del comprador antes de liberar el pago, y un badge binario de **identidad verificada** (ver el punto siguiente).
+- **Documento de identidad pedido desde el registro**: tipo y número de documento (DNI, Pasaporte o Carné de Extranjería) se piden como parte del formulario de registro — o, para cuentas creadas con Google (que no pasan por ese formulario), justo antes de publicar un pasaje por primera vez. Es un dato declarado, no verificado biométricamente todavía; sienta la base para una verificación real más adelante.
 
 ## 10. Identidad de marca
 
