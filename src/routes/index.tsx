@@ -469,6 +469,30 @@ function Landing() {
               )}
             </div>
           )}
+
+          {/* Skeleton: mientras Supabase todavía no responde, la card real de
+              arriba no existe (destacado es undefined) y antes eso dejaba un
+              hueco en blanco varios cientos de ms — se sentía como "demora".
+              Mismas medidas exactas que la card real para que no haya salto
+              de layout cuando llegue la data. */}
+          {!destacado && isLoading && (
+            <div className="hero-elem md:col-span-5">
+              <div className="animate-pulse overflow-hidden rounded-[1.75rem] border border-border bg-white shadow-md">
+                <div className="h-44 bg-muted" />
+                <div className="space-y-3 p-5">
+                  <div className="flex items-center justify-between">
+                    <div className="h-6 w-24 rounded bg-muted" />
+                    <div className="h-6 w-20 rounded bg-muted" />
+                  </div>
+                  <div className="h-3 w-40 rounded bg-muted" />
+                  <div className="flex items-center gap-2.5 border-t border-dashed border-border pt-4">
+                    <div className="h-7 w-7 rounded-full bg-muted" />
+                    <div className="h-3 w-32 rounded bg-muted" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </section>
 
