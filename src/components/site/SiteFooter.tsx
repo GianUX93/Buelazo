@@ -5,7 +5,7 @@ export function SiteFooter() {
     <footer className="border-t border-hairline">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[2fr_1fr_1fr_1fr]">
         <div>
-          <img src="/logo-buelazo-dark.png" alt="Buelazo" className="h-6 w-auto" />
+          <img src="/logo-buelazo-dark.svg" alt="Buelazo" className="h-6 w-auto" />
           <p className="mt-3 max-w-xs text-sm text-muted-foreground">
             El marketplace peruano para transferir pasajes aéreos entre personas, con pago retenido
             hasta confirmar el endoso.

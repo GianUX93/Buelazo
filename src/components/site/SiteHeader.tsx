@@ -103,7 +103,7 @@ export function SiteHeader() {
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         <Link to="/" className="flex shrink-0 items-center">
           <img
-            src={transparent ? "/logo-buelazo-white.png" : "/logo-buelazo-dark.png"}
+            src={transparent ? "/logo-buelazo-white.svg" : "/logo-buelazo-dark.svg"}
             alt="Buelazo"
             className="h-7 w-auto"
           />
