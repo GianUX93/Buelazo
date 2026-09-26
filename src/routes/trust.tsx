@@ -1,5 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { ShieldCheck, Lock, FileCheck2, Scale, HelpCircle, ArrowRight } from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { ShieldCheck, Lock, FileCheck2, Scale, HelpCircle } from "lucide-react";
 import { WhatsAppIcon } from "@/components/site/WhatsAppIcon";
 import { SOPORTE_WHATSAPP_URL } from "@/lib/support";
 
@@ -142,13 +142,6 @@ function Trust() {
           Escribir a soporte por WhatsApp
         </a>
       </div>
-
-      <Link
-        to="/explore"
-        className="mt-8 inline-flex items-center gap-1.5 text-sm font-bold text-[var(--color-primary-token)] hover:underline"
-      >
-        Volver a explorar vuelos <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
     </div>
   );
 }

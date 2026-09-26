@@ -8,7 +8,15 @@ import {
   getSimilarActiveResalePrices,
 } from "@/lib/services/flights";
 import { submitFeatureFeedback, type FeedbackScore } from "@/lib/services/feedback";
-import { savePublishDraft, loadPublishDraft, clearPublishDraft } from "@/lib/publish-draft";
+import {
+  savePublishDraft,
+  loadPublishDraft,
+  clearPublishDraft,
+  markPendingAutoResume,
+  consumePendingAutoResume,
+  peekPendingAutoResume,
+  type PublishDraft,
+} from "@/lib/publish-draft";
 import { PublishDraftRecoveryModal } from "@/components/site/publish/PublishDraftRecoveryModal";
 import { CompleteDocumentModal } from "@/components/site/auth/CompleteDocumentModal";
 import { useEffect, useRef, useState } from "react";
@@ -51,12 +59,83 @@ import {
 } from "@/lib/flight-utils";
 import { PhoneInput } from "@/components/site/PhoneInput";
 import { Field, PillToggle, AsientoFields, ReceiptRow } from "@/components/site/PublishFormFields";
-import { LucIAName } from "@/components/site/agent-chat/LucIAName";
+
+// En "Vender pasaje" el asistente se presenta como Buelito (no lucIA) —
+// texto en rojo de marca en vez del degradé que usa LucIAName en el chat.
+function BuelitoName() {
+  return <span className="font-bold text-[var(--color-primary-token)]">Buelito</span>;
+}
 
 // scrollIntoView ignora el header sticky y deja el contenido tapado detrás de
 // él — todo scroll programático de esta página calcula el offset a mano
 // contra esta misma constante.
 const SITE_HEADER_HEIGHT = 56;
+
+// Factory (no un objeto compartido) para que "Empezar de nuevo" pueda pedir
+// un estado inicial fresco sin arrastrar la misma referencia de `pasajero`
+// entre reintentos.
+function createDefaultPublishData() {
+  return {
+    airline: "LATAM",
+    flightNumber: "",
+    from: "LIM",
+    to: "CUZ",
+    date: "",
+    time: "",
+    arrivalTime: "",
+    hasReturn: false,
+    returnFrom: "CUZ",
+    returnTo: "LIM",
+    returnDate: "",
+    returnTime: "",
+    returnArrivalTime: "",
+    tramoAVender: "ida" as TramoAVender,
+    // Sin prellenar: son montos reales de dinero, no algo que el vendedor
+    // deba notar y corregir a mano — mejor forzar que los escriba él mismo
+    // (los inputs ya muestran "" cuando el valor es 0).
+    original: 0,
+    price: 0,
+    baggage: "solo cabina",
+    fareType: "",
+    asientoIdaTipo: "seleccionado" as Asiento["tipo"],
+    asientoIdaCategoria: "ventana" as AsientoCategoria | null,
+    asientoIdaNumero: "",
+    asientoRegresoTipo: "seleccionado" as Asiento["tipo"],
+    asientoRegresoCategoria: "ventana" as AsientoCategoria | null,
+    asientoRegresoNumero: "",
+    booking: "",
+    voucherUrl: null as string | null,
+    voucherName: "",
+    pasajero: {
+      nombres: "",
+      apellidoPaterno: "",
+      apellidoMaterno: "",
+      email: "",
+      telefonoPrefijo: "+51",
+      telefono: "",
+      tipoDocumento: "DNI" as TipoDocumento,
+      numeroDocumento: "",
+    },
+    cargoEstimado: null as number | null,
+    notaVendedor: "",
+  };
+}
+
+// Baseline para detectar un borrador "vacío" — mismos valores que
+// createDefaultPublishData(), nada que el vendedor haya escrito de verdad.
+// Sin este chequeo, cualquier interacción mínima con el Paso 1 (tocar un
+// select sin cambiar su valor, por ejemplo) dispara el auto-guardado y dejaba
+// un borrador con todos los campos en blanco — el modal de "¿recuperar o
+// empezar de nuevo?" terminaba apareciendo SIEMPRE que se entraba a "Vender
+// vuelos", sin haber nada real que recuperar.
+const BLANK_PUBLISH_DATA_JSON = JSON.stringify(createDefaultPublishData());
+function isBlankPublishData(data: Record<string, unknown>): boolean {
+  try {
+    return JSON.stringify(data) === BLANK_PUBLISH_DATA_JSON;
+  } catch {
+    return false;
+  }
+}
 
 // Mismo orden que `primerCampoFaltantePaso0()` (más abajo, dentro de
 // `Publish`) — se declara acá afuera porque no depende de ningún estado del
@@ -101,12 +180,20 @@ function Publish() {
   // login/registro al intentar avanzar al Paso 2 (Precio), no antes. Por eso
   // esta ruta ya NO usa useRequireAuth(): esa página entera quedaba detrás
   // de un login inmediato, que es justo lo que este cambio reemplaza.
-  const { user, profile } = useAuth();
+  const { user, profile, isLoading: authLoading } = useAuth();
   const { openAuthModal } = useAuthModal();
   const navigate = useNavigate();
   // Se activa cuando se pidió login desde el botón "Continuar" del Paso 1 —
   // en cuanto `user` pase a existir, se avanza solo al Paso 2 sin que el
-  // usuario tenga que volver a tocar "Continuar".
+  // usuario tenga que volver a tocar "Continuar". Arranca en false a
+  // propósito: se siembra recién dentro del efecto de más abajo, nunca como
+  // argumento de este useRef — ese argumento se re-evalúa en cada render (no
+  // es lazy como useState(() => ...)), y consumePendingAutoResume() borra la
+  // señal de sessionStorage al leerla, así que un render de más (React puede
+  // re-renderizar antes de confirmar, con o sin StrictMode) la consumía en
+  // una pasada descartada y el render real ya no la encontraba — el borrador
+  // dejaba de aplicarse y el Paso 1 se veía "reiniciado" tras volver de
+  // Google.
   const pendingAdvanceRef = useRef(false);
   const [showCompleteDocument, setShowCompleteDocument] = useState(false);
   const [step, setStep] = useState(0);
@@ -175,23 +262,83 @@ function Publish() {
   // teniendo los mismos datos ya publicados, y volver al Paso 0 con eso
   // prellenado invita a publicarlo de nuevo por error. En ese caso se manda
   // a home en vez de al formulario.
+  //
+  // authLoading en el guard: Supabase resuelve la sesión de forma asíncrona
+  // al montar — `user` empieza en null incluso para alguien SÍ logueado,
+  // durante ese instante. Sin este freno, restaurar un borrador guardado en
+  // Precio/Listo (ver PublishDraftRecoveryModal) podía pisarse solo si el
+  // clic en "Recuperar datos" llegaba antes de que la sesión terminara de
+  // confirmarse — este efecto veía `!user` (todavía cargando, no "sin
+  // sesión") y mandaba de vuelta al Paso 0 lo que se acababa de recuperar.
   useEffect(() => {
-    if (!user && step > 0) {
+    if (!authLoading && !user && step > 0) {
       if (step === 3) {
         navigate({ to: "/" });
         return;
       }
       setStep(0);
     }
-  }, [user, step, navigate]);
+  }, [user, authLoading, step, navigate]);
 
-  // Borrador del Paso 1: si al entrar a "Vender vuelos" (con o sin sesión)
-  // existe uno guardado, se ofrece recuperarlo antes de mostrar el paso 0
-  // vacío — nunca se aplica solo, siempre es una decisión explícita.
-  const [draftFound, setDraftFound] = useState<Record<string, unknown> | null>(null);
+  // Borrador de "Vender vuelos": si al entrar (con o sin sesión) existe uno
+  // guardado, normalmente se ofrece recuperarlo antes de mostrar el paso 0
+  // vacío — nunca se aplica solo, siempre es una decisión explícita. La
+  // excepción es cuando de verdad se vuelve de loguearse con Google a mitad
+  // del Paso 1: ahí la intención ya quedó clara al tocar "Continuar" antes de
+  // irse, así que el borrador se aplica directo y jamás se muestra el modal.
+  //
+  // El punto delicado: peekPendingAutoResume() solo dice "se tocó Continuar
+  // sin sesión antes de este mount", NO que el login se haya completado —
+  // alguien puede cerrar el modal de Google o recargar sin loguearse jamás.
+  // La versión anterior consumía la señal apenas montaba y aplicaba el
+  // borrador en silencio sin verificar sesión real: la primera recarga sin
+  // loguearse ya "gastaba" la señal y mezclaba datos sin preguntar, y recién
+  // la SEGUNDA recarga mostraba el modal — inconsistente y confuso. Ahora se
+  // espera a que `authLoading` resuelva antes de decidir: si hay `user` de
+  // verdad, fue un regreso real de Google y se aplica en silencio; si no,
+  // nunca hubo login y se cae al modal normal, igual que cualquier borrador
+  // viejo. Ese caso puntual siempre vuelve al Paso 1 (login solo se pedía
+  // ahí), por eso no restaura `step` — lo hace el efecto de pendingAdvanceRef
+  // más abajo. El modal sí restaura `step` (ver onRecover).
+  // Envuelve loadPublishDraft() descartando (y borrando) un borrador vacío —
+  // ver isBlankPublishData más arriba.
+  function loadMeaningfulDraft(): PublishDraft | null {
+    const draft = loadPublishDraft();
+    if (draft && isBlankPublishData(draft.data)) {
+      clearPublishDraft();
+      return null;
+    }
+    return draft;
+  }
+
+  const [draftFound, setDraftFound] = useState<PublishDraft | null>(null);
+  const pendingAutoResumeDraftRef = useRef<PublishDraft | null>(null);
+  const hasPendingAutoResumeRef = useRef(false);
+  const autoResumeDecidedRef = useRef(false);
   useEffect(() => {
-    setDraftFound(loadPublishDraft());
+    const draft = loadMeaningfulDraft();
+    if (peekPendingAutoResume()) {
+      // Se decide más abajo, cuando se sepa si de verdad hay sesión — no se
+      // muestra el modal todavía para no hacerlo parpadear si sí hay sesión.
+      hasPendingAutoResumeRef.current = true;
+      pendingAutoResumeDraftRef.current = draft;
+    } else {
+      setDraftFound(draft);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (authLoading || autoResumeDecidedRef.current || !hasPendingAutoResumeRef.current) return;
+    autoResumeDecidedRef.current = true;
+    consumePendingAutoResume();
+    const draft = pendingAutoResumeDraftRef.current;
+    if (user && draft) {
+      pendingAdvanceRef.current = true;
+      setData((prev) => ({ ...prev, ...draft.data }));
+    } else {
+      setDraftFound(draft);
+    }
+  }, [authLoading, user]);
 
   const [scanning, setScanning] = useState(false);
   const voucherInputRef = useRef<HTMLInputElement | null>(null);
@@ -205,53 +352,50 @@ function Publish() {
   // intentar avanzar sin completar todo se marcan en amarillo los campos que
   // faltan (sin texto adicional, la interacción es solo visual).
   const [showValidation, setShowValidation] = useState(false);
-  const [data, setData] = useState({
-    airline: "LATAM",
-    flightNumber: "",
-    from: "LIM",
-    to: "CUZ",
-    date: "",
-    time: "",
-    arrivalTime: "",
-    hasReturn: false,
-    returnFrom: "CUZ",
-    returnTo: "LIM",
-    returnDate: "",
-    returnTime: "",
-    returnArrivalTime: "",
-    tramoAVender: "ida" as TramoAVender,
-    // Sin prellenar: son montos reales de dinero, no algo que el vendedor
-    // deba notar y corregir a mano — mejor forzar que los escriba él mismo
-    // (los inputs ya muestran "" cuando el valor es 0).
-    original: 0,
-    price: 0,
-    baggage: "solo cabina",
-    fareType: "",
-    asientoIdaTipo: "seleccionado" as Asiento["tipo"],
-    asientoIdaCategoria: "ventana" as AsientoCategoria | null,
-    asientoIdaNumero: "",
-    asientoRegresoTipo: "seleccionado" as Asiento["tipo"],
-    asientoRegresoCategoria: "ventana" as AsientoCategoria | null,
-    asientoRegresoNumero: "",
-    booking: "",
-    voucherUrl: null as string | null,
-    voucherName: "",
-    pasajero: {
-      nombres: "",
-      apellidoPaterno: "",
-      apellidoMaterno: "",
-      email: "",
-      telefonoPrefijo: "+51",
-      telefono: "",
-      tipoDocumento: "DNI" as TipoDocumento,
-      numeroDocumento: "",
-    },
-    cargoEstimado: null as number | null,
-    notaVendedor: "",
-  });
+  const [data, setData] = useState(createDefaultPublishData);
 
   const precioMinimo = Math.max(1, Math.ceil(data.original * 0.1));
   const precioMaximo = Math.max(precioMinimo, data.original - 1);
+
+  // Auto-guardado continuo: antes solo se guardaba una vez, justo antes de
+  // pedir login por primera vez — un usuario ya logueado que avanzaba a
+  // Precio/Listo y navegaba a otra sección (desapareciendo este componente)
+  // perdía todo, porque nunca se había guardado nada para él. Se guarda en
+  // cada cambio de datos o de paso, con o sin sesión; se detiene en el Paso 3
+  // porque ahí el pasaje ya se publicó (seguir guardando invitaría a
+  // publicarlo de nuevo por error si se vuelve a entrar). También se salta
+  // mientras el modal de recuperación esté pendiente de decisión, para no
+  // pisar un borrador real con el estado vacío recién montado.
+  //
+  // skipFirstRunRef evita ESE mismo pisado en el primerísimo render: el
+  // efecto de carga de arriba corre en el mismo commit inicial, pero sus
+  // setData/setDraftFound recién se reflejan en el siguiente render — sin
+  // este freno, este efecto vería un instante los valores por defecto
+  // (step 0, data vacía, draftFound todavía null) y sobrescribiría el
+  // borrador real antes de que el otro efecto termine de aplicarlo.
+  //
+  // skipNextSaveRef es el mismo problema pero al revés, en "Empezar de
+  // nuevo": onDiscard borra el localStorage, pero `data` en memoria sigue
+  // teniendo los valores por defecto (que no están vacíos: airline ya es
+  // "LATAM", from "LIM", etc.) — al pasar draftFound de un objeto a null,
+  // este efecto se re-disparaba igual y volvía a guardar esos defaults como
+  // si fueran un borrador real, resucitando el modal la próxima vez que se
+  // entraba a "Vender vuelos". onDiscard prende este flag para saltarse esa
+  // única repetición.
+  const skipFirstRunRef = useRef(true);
+  const skipNextSaveRef = useRef(false);
+  useEffect(() => {
+    if (skipFirstRunRef.current) {
+      skipFirstRunRef.current = false;
+      return;
+    }
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    if (step >= 3 || draftFound || isBlankPublishData(data)) return;
+    savePublishDraft(data, step);
+  }, [data, step, draftFound]);
 
   // Precio de otras publicaciones activas en la misma ruta (y aerolínea, si
   // ya hay suficientes) — dato real de Supabase, no un valor de ejemplo.
@@ -276,7 +420,29 @@ function Publish() {
     marketAvgRaw !== null && marketAvgRaw >= precioMinimo && marketAvgRaw <= precioMaximo
       ? marketAvgRaw
       : null;
-  const suggested = marketAvg ?? Math.round(data.original * 0.48);
+  // Con pocas publicaciones comparables el promedio es ruidoso — un solo
+  // vendedor rematando su pasaje (o liquidando antes del vuelo) puede
+  // arrastrar la sugerencia muy por debajo de lo razonable y asustar a quien
+  // recién está por publicar. Se mezcla con el punto de partida genérico,
+  // dándole cada vez más peso al mercado real a medida que hay más
+  // publicaciones que lo respalden, hasta confiar en él del todo a partir de
+  // MIN_COMPARABLES_CONFIABLES.
+  const MIN_COMPARABLES_CONFIABLES = 3;
+  const heuristica = Math.round(data.original * 0.48);
+  const pesoMercado =
+    marketAvg === null ? 0 : Math.min(similarPrices.length / MIN_COMPARABLES_CONFIABLES, 1);
+  const sugeridoCrudo =
+    marketAvg !== null
+      ? Math.round(marketAvg * pesoMercado + heuristica * (1 - pesoMercado))
+      : heuristica;
+  // Piso adicional: aunque el mercado esté bajo, no se sugiere muy por debajo
+  // del original — una cifra que se siente como "estás regalando tu pasaje"
+  // desalienta publicar, aunque técnicamente sea un precio válido (el mínimo
+  // real sigue siendo precioMinimo, 10% del original).
+  const suggested = Math.min(
+    precioMaximo,
+    Math.max(sugeridoCrudo, Math.round(data.original * 0.35)),
+  );
   const precioError =
     data.price >= data.original
       ? `El precio de reventa debe ser menor al original (${S(data.original)}). Este no es un marketplace de reventa a la par.`
@@ -574,9 +740,11 @@ function Publish() {
     return (
       <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
         <div className="rounded-[2rem] border border-border bg-white p-10 text-center shadow-sm">
-          <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[var(--color-secondary-token)] text-white">
-            <CheckCircle2 className="h-8 w-8" />
-          </div>
+          <img
+            src="/assets/buelito/card-2.png"
+            alt=""
+            className="mx-auto h-[120px] w-[120px] rounded-full object-cover"
+          />
           <h1 className="mt-6 font-display text-4xl font-extrabold text-[var(--color-ink)]">
             Enviado a revisión
           </h1>
@@ -621,10 +789,17 @@ function Publish() {
         open={!!draftFound}
         onDiscard={() => {
           clearPublishDraft();
+          skipNextSaveRef.current = true;
+          setData(createDefaultPublishData());
           setDraftFound(null);
         }}
         onRecover={() => {
-          if (draftFound) setData((prev) => ({ ...prev, ...draftFound }));
+          if (draftFound) {
+            setData((prev) => ({ ...prev, ...draftFound.data }));
+            stepDirection.current = 1;
+            setStep(draftFound.step);
+            setShowValidation(false);
+          }
           setDraftFound(null);
         }}
       />
@@ -647,7 +822,7 @@ function Publish() {
         Convierte tu vuelo en dinero de vuelta.
       </h1>
       <p className="mt-4 text-sm font-medium leading-snug text-muted-foreground">
-        <LucIAName /> te acompaña: lee tu comprobante por ti y te sugiere un precio competitivo.
+        <BuelitoName /> te acompaña: lee tu comprobante por ti y te sugiere un precio competitivo.
       </p>
 
       {/* Stepper */}
@@ -775,7 +950,7 @@ function Publish() {
                     {scanning ? (
                       <>
                         <div className="text-sm font-bold text-[var(--color-ink)]">
-                          <LucIAName /> está leyendo tu comprobante…
+                          <BuelitoName /> está leyendo tu comprobante…
                         </div>
                         <p className="text-xs font-medium text-muted-foreground">
                           Extrayendo aerolínea, vuelo, ruta y horarios del voucher.
@@ -1383,20 +1558,22 @@ function Publish() {
                 <div className="flex items-start gap-4">
                   <div className="flex-1">
                     <div className="text-sm font-bold text-[var(--color-ink)]">
-                      <LucIAName /> sugiere, para rotar rápido:{" "}
+                      <BuelitoName /> sugiere, para rotar rápido:{" "}
                       <span className="font-mono text-xl text-[var(--color-secondary-token)] ml-1">
                         {S(suggested)}
                       </span>
                     </div>
                     <div className="mt-1 text-xs font-medium text-[var(--color-ink)]/70">
-                      {marketAvg !== null
-                        ? `Promedio de ${similarPrices.length} publicación${similarPrices.length === 1 ? "" : "es"} activa${similarPrices.length === 1 ? "" : "s"} en esta ruta.`
-                        : "No hay suficientes publicaciones comparables a tu precio — punto de partida sugerido."}
+                      {marketAvg === null
+                        ? "No hay suficientes publicaciones comparables a tu precio — punto de partida sugerido."
+                        : similarPrices.length >= MIN_COMPARABLES_CONFIABLES
+                          ? `Promedio de ${similarPrices.length} publicaciones activas en esta ruta.`
+                          : `Solo ${similarPrices.length} publicación${similarPrices.length === 1 ? "" : "es"} activa${similarPrices.length === 1 ? "" : "s"} en esta ruta — ajustado con un punto de partida más conservador.`}
                     </div>
                   </div>
                   <button
                     onClick={() => setData({ ...data, price: suggested })}
-                    className="rounded-full bg-white border border-[var(--color-secondary-token)] px-4 py-1.5 text-xs font-bold text-[var(--color-secondary-token)] hover:bg-[var(--color-secondary-token)] hover:text-white transition-colors shadow-sm"
+                    className="rounded-full border border-border bg-white px-4 py-1.5 text-xs font-bold text-[var(--color-ink)] transition-colors hover:bg-muted shadow-sm"
                   >
                     Usar
                   </button>
@@ -1583,7 +1760,8 @@ function Publish() {
             // El Paso 1 se llena completo sin sesión — el login/registro
             // recién se pide acá, al intentar pasar al Precio, no antes.
             if (step === 0 && !user) {
-              savePublishDraft(data);
+              savePublishDraft(data, step);
+              markPendingAutoResume();
               pendingAdvanceRef.current = true;
               openAuthModal("login", {
                 title: "¡Ya tenemos los datos de tu vuelo!",
@@ -1660,7 +1838,7 @@ function PriceSuggestionCsat({ suggested, used }: { suggested: number; used: boo
       ) : (
         <>
           <span>
-            ¿Te sirvió el precio que sugirió <LucIAName />?
+            ¿Te sirvió el precio que sugirió <BuelitoName />?
           </span>
           <button
             type="button"

@@ -340,18 +340,23 @@ function Explore() {
               misma posición que tenía el selector antes. Look "tech/IA"
               (borde en degradé de marca) porque desde este lado se ofrece
               pasar al chat con lucIA, no al revés. */}
-          <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
-            <button
-              type="button"
-              onClick={() => setMode("agente")}
-              className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[var(--color-secondary-token)] via-[var(--color-accent-token)] to-[var(--color-primary-token)] p-[1.5px] shadow-sm"
-            >
-              <span className="inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)]/70 px-5 py-2 text-sm font-bold text-white backdrop-blur-md transition-colors group-hover:bg-[var(--color-ink)]/50">
-                <Sparkles className="h-4 w-4 text-white" />
-                Buscar con lucIA
-              </span>
-            </button>
-          </div>
+          {/* Botón "Buscar con lucIA" oculto para este MVP por decisión de
+              producto (mismo criterio que LUCIA_HABILITADO en index.tsx) —
+              no se elimina, solo se deja de renderizar. */}
+          {false && (
+            <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setMode("agente")}
+                className="group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[var(--color-secondary-token)] via-[var(--color-accent-token)] to-[var(--color-primary-token)] p-[1.5px] shadow-sm"
+              >
+                <span className="inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)]/70 px-5 py-2 text-sm font-bold text-white backdrop-blur-md transition-colors group-hover:bg-[var(--color-ink)]/50">
+                  <Sparkles className="h-4 w-4 text-white" />
+                  Buscar con lucIA
+                </span>
+              </button>
+            </div>
+          )}
           <div className="relative mx-auto max-w-7xl px-4 sm:px-6">
             <h1 className="mt-6 font-display text-4xl font-extrabold text-white md:text-5xl">
               Explorar vuelos
@@ -640,99 +645,124 @@ function Explore() {
               </div>
             )}
 
-            {results.length === 0 && !(rango === "fecha" && !selectedDate) && (
-              <div className="mt-8 rounded-[2rem] border border-border bg-white p-8 md:p-10 shadow-sm text-center">
-                <div className="text-xs font-bold uppercase tracking-widest text-[var(--color-primary-token)]">
-                  Sin resultados
-                </div>
-                <h2 className="mt-2 font-display text-3xl font-extrabold text-[var(--color-ink)]">
-                  No encontramos pasajes con estos filtros
-                </h2>
-                <p className="mx-auto mt-3 max-w-xl text-sm font-medium text-muted-foreground leading-relaxed">
-                  Este es un marketplace: el inventario depende de lo que otras personas publican.
-                  Prueba ampliando el rango de fechas o quitando algún filtro.
-                </p>
-
-                {!(search.from && search.to) && (
-                  <p className="mx-auto mt-4 max-w-xs text-xs font-medium text-muted-foreground/80">
-                    Elige origen y destino para activar una alerta de este pasaje.
+            {/* Escenario B: todavía no hay origen/destino elegidos (o el
+                marketplace tiene poca oferta). Tono neutro a propósito — es
+                una invitación a crear una alerta, no una disculpa por estar
+                vacío, por eso no comparte el eyebrow rojo "Sin resultados"
+                del Escenario A ni ningún texto que suene a justificación. El
+                CTA vive deshabilitado acá: en cuanto se elige origen y
+                destino, esta condición deja de cumplirse y el Escenario A de
+                abajo toma su lugar con el botón real. */}
+            {results.length === 0 &&
+              !(rango === "fecha" && !selectedDate) &&
+              !(search.from && search.to) && (
+                <div className="mt-8 p-8 text-center md:p-10">
+                  <img
+                    src="/assets/buelito/bell.png"
+                    alt=""
+                    className="mx-auto h-[72px] w-[72px] select-none object-contain"
+                  />
+                  <h2 className="mt-3 font-display text-3xl font-extrabold text-[var(--color-ink)]">
+                    Recibe una alerta apenas aparezca tu vuelo
+                  </h2>
+                  <p className="mx-auto mt-3 max-w-xl text-sm font-medium text-muted-foreground leading-relaxed">
+                    Elige origen y destino para activarla.
                   </p>
-                )}
+                </div>
+              )}
 
-                {search.from && search.to && (
-                  <>
-                    {alertSaved ? (
-                      <div className="mx-auto mt-6 max-w-md overflow-hidden rounded-[1.5rem] border border-[var(--color-secondary-token)]/25 bg-gradient-to-br from-[var(--color-secondary-token)]/8 to-transparent text-left shadow-sm">
-                        <div className="flex items-start gap-3 p-5">
-                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--color-secondary-token)]/15">
-                            <CheckCircle2 className="h-5 w-5 text-[var(--color-secondary-token)]" />
+            {/* Escenario A: ya se eligió origen y destino, y esa combinación
+                específica no tiene pasajes activos. */}
+            {results.length === 0 &&
+              !(rango === "fecha" && !selectedDate) &&
+              search.from &&
+              search.to && (
+                <div className="mt-8 p-8 text-center md:p-10">
+                  <img
+                    src="/assets/buelito/search.png"
+                    alt=""
+                    className="mx-auto h-[72px] w-[72px] select-none object-contain"
+                  />
+                  <div className="mt-3 text-xs font-bold uppercase tracking-widest text-[var(--color-primary-token)]">
+                    Sin resultados
+                  </div>
+                  <h2 className="mt-2 font-display text-3xl font-extrabold text-[var(--color-ink)]">
+                    No hay pasajes con estos filtros
+                  </h2>
+                  <p className="mx-auto mt-3 max-w-xl text-sm font-medium text-muted-foreground leading-relaxed">
+                    El inventario cambia según lo que otros publican.
+                  </p>
+
+                  {alertSaved ? (
+                    <div className="mx-auto mt-6 max-w-md overflow-hidden rounded-[1.5rem] border border-[var(--color-secondary-token)]/25 bg-gradient-to-br from-[var(--color-secondary-token)]/8 to-transparent text-left shadow-sm">
+                      <div className="flex items-start gap-3 p-5">
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[var(--color-secondary-token)]/15">
+                          <CheckCircle2 className="h-5 w-5 text-[var(--color-secondary-token)]" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-display text-base font-extrabold text-[var(--color-ink)]">
+                              Alerta activada
+                            </div>
+                            <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-bold text-[var(--color-ink)] shadow-sm">
+                              {rutaResumen}
+                            </span>
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="font-display text-base font-extrabold text-[var(--color-ink)]">
-                                Alerta activada
-                              </div>
-                              <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-bold text-[var(--color-ink)] shadow-sm">
-                                {rutaResumen}
-                              </span>
-                            </div>
-                            <div className="mt-2.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                              <Mail className="h-3.5 w-3.5 shrink-0" />
-                              Te avisaremos por notificación cuando aparezca
-                            </div>
+                          <div className="mt-2.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                            <Mail className="h-3.5 w-3.5 shrink-0" />
+                            Te avisaremos por notificación cuando aparezca
                           </div>
                         </div>
                       </div>
-                    ) : (
-                      <button
-                        disabled={creandoAlerta}
-                        onClick={async () => {
-                          if (!user || user.id.startsWith("sim-")) {
-                            toast.error("Inicia sesión para activar alertas de búsqueda.");
-                            return;
-                          }
-                          setCreandoAlerta(true);
-                          try {
-                            await createRouteAlert(user.id, search.from!, search.to!);
-                            setAlertSaved(true);
-                            toast.custom((toastId) => (
-                              <div className="flex w-full gap-3 rounded-lg bg-white p-4 shadow-lg border border-border">
-                                <BellRing className="h-5 w-5 shrink-0 text-[var(--color-secondary-token)]" />
-                                <div className="min-w-0 flex-1">
-                                  <div className="text-sm font-semibold text-[var(--color-ink)]">
-                                    Alerta creada
-                                  </div>
-                                  <p className="mt-0.5 text-sm text-muted-foreground">
-                                    Te avisaremos cuando aparezca un pasaje para {rutaResumen}.
-                                  </p>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      navigate({ to: "/profile", search: { tab: "preferencias" } });
-                                      toast.dismiss(toastId);
-                                    }}
-                                    className="mt-1.5 text-sm font-bold text-[var(--color-primary-token)] hover:underline"
-                                  >
-                                    Ver alertas
-                                  </button>
+                    </div>
+                  ) : (
+                    <button
+                      disabled={creandoAlerta}
+                      onClick={async () => {
+                        if (!user || user.id.startsWith("sim-")) {
+                          toast.error("Inicia sesión para activar alertas de búsqueda.");
+                          return;
+                        }
+                        setCreandoAlerta(true);
+                        try {
+                          await createRouteAlert(user.id, search.from!, search.to!);
+                          setAlertSaved(true);
+                          toast.custom((toastId) => (
+                            <div className="flex w-full gap-3 rounded-lg bg-white p-4 shadow-lg border border-border">
+                              <BellRing className="h-5 w-5 shrink-0 text-[var(--color-secondary-token)]" />
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-semibold text-[var(--color-ink)]">
+                                  Alerta creada
                                 </div>
+                                <p className="mt-0.5 text-sm text-muted-foreground">
+                                  Te avisaremos cuando aparezca un pasaje para {rutaResumen}.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigate({ to: "/profile", search: { tab: "preferencias" } });
+                                    toast.dismiss(toastId);
+                                  }}
+                                  className="mt-1.5 text-sm font-bold text-[var(--color-primary-token)] hover:underline"
+                                >
+                                  Ver alertas
+                                </button>
                               </div>
-                            ));
-                          } catch {
-                            toast.error("No se pudo crear la alerta.");
-                          } finally {
-                            setCreandoAlerta(false);
-                          }
-                        }}
-                        className="mt-6 inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
-                      >
-                        <Bell className="h-4 w-4" /> Avísame cuando aparezcan pasajes
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
+                            </div>
+                          ));
+                        } catch {
+                          toast.error("No se pudo crear la alerta.");
+                        } finally {
+                          setCreandoAlerta(false);
+                        }
+                      }}
+                      className="mt-6 inline-flex items-center gap-2 rounded-full bg-[var(--color-secondary-token)] px-6 py-3 text-sm font-bold text-white transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
+                    >
+                      <Bell className="h-4 w-4" /> Avísame cuando aparezca este pasaje
+                    </button>
+                  )}
+                </div>
+              )}
 
             {/* Active grid */}
             {results.length > 0 && (

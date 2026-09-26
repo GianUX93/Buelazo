@@ -72,11 +72,14 @@ export function AuthForm({
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
-    // Google sale de la app por naturaleza (redirect externo) — vuelve
-    // siempre al inicio, no a la página exacta donde se abrió el modal.
+    // Google sale de la app por naturaleza (redirect externo) — hay que
+    // decirle explícitamente que vuelva a la página exacta donde se abrió
+    // el modal (ej. /publish a mitad del formulario), no al origin/home:
+    // ahí es donde vive el borrador guardado (ver publish-draft.ts) que
+    // permite retomar el flujo justo donde se quedó.
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: window.location.origin },
+      options: { redirectTo: window.location.href },
     });
     if (error) {
       toast.error(error.message);

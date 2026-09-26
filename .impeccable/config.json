@@ -17,6 +17,11 @@
         "value": "inter",
         "createdAt": "2026-09-12T20:32:33.345Z",
         "reason": "pre-existing choice shared by the whole product (not introduced by this home-only redesign); documented in DESIGN.md Do's and Don'ts as an intentionally unglamorous workhorse body face, out of scope to change per-surface"
+      },
+      {
+        "rule": "design-system-font",
+        "value": "baloo 2",
+        "createdAt": "2026-09-25T05:45:28.204Z"
       }
     ]
   }

@@ -46,7 +46,7 @@
   --color-surface-2: var(--surface-2);
   --color-hairline: var(--hairline);
 
-  --font-display: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Baloo 2", "Sora", ui-sans-serif, system-ui, sans-serif;
   --font-sans:
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
@@ -60,13 +60,14 @@
 :root {
   --radius: 0.5rem;
 
-  /* Rediseño: Tokens exactos solicitados */
+  /* Rediseño de marca (Buelito): paleta exacta entregada por diseño. */
   --color-bg: #FFFFFF;
-  --color-ink: #1A1E2B;
-  --color-primary-token: #FF5B49;
-  --color-secondary-token: #00C2A8;
+  --color-cream: #FAF3E4;
+  --color-ink: #1A1A1C;
+  --color-primary-token: #ED3D2B;
+  --color-secondary-token: #E6C27A;
   --color-warning-token: #FFC93C;
-  --color-accent-token: #7C5CFC;
+  --color-accent-token: #FF5B49;
 
   /* Mapeo a sistema base (mantiene retrocompatibilidad) */
   --background: var(--color-bg);
